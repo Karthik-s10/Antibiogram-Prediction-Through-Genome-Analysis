@@ -9,6 +9,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import GenomeUploader from "./GenomeUploader";
 import ResultsDashboard from "./ResultsDashboard";
+import KEGGGenomeSearch from "./KEGGGenomeSearch";
 import { motion } from "framer-motion";
 import {
   ResistancePredictor,
@@ -129,9 +130,12 @@ const HomePage = () => {
               onValueChange={setActiveTab}
               className="w-full"
             >
-              <TabsList className="grid w-full grid-cols-2 mb-8">
+              <TabsList className="grid w-full grid-cols-3 mb-8">
                 <TabsTrigger value="upload" disabled={isProcessing}>
                   Genome Upload
+                </TabsTrigger>
+                <TabsTrigger value="kegg" disabled={isProcessing}>
+                  KEGG Database
                 </TabsTrigger>
                 <TabsTrigger value="results" disabled={!processedResult}>
                   Results Dashboard
@@ -142,6 +146,71 @@ const HomePage = () => {
                 <GenomeUploader
                   onFileUpload={handleFileUpload}
                   isProcessing={isProcessing}
+                />
+              </TabsContent>
+
+              <TabsContent value="kegg" className="mt-0">
+                <KEGGGenomeSearch
+                  onGenomeSelect={(genome) => {
+                    console.log("Selected KEGG genome:", genome);
+                    // You can add logic here to process the selected KEGG genome
+                  }}
+                  onSequenceDownload={(genome) => {
+                    console.log("Downloaded sequence for:", genome.organism);
+                    // You can add logic here to handle the downloaded sequence
+                  }}
+                  onBatchProcess={(genomes) => {
+                    console.log(
+                      `Processing ${genomes.length} genomes in batch mode`,
+                    );
+                    setIsProcessing(true);
+
+                    // Simulate batch processing
+                    setTimeout(() => {
+                      // In a real implementation, this would call the Python ML model
+                      // through an API endpoint to process all genomes
+
+                      // For demo, we'll create a mock result for the first genome
+                      if (genomes.length > 0) {
+                        const genome = genomes[0];
+
+                        // Create a mock genome data object
+                        const genomeData = {
+                          id: genome.id,
+                          name: `${genome.organism} (${genome.id})`,
+                          size: genome.size,
+                          uploadDate: new Date(),
+                        };
+
+                        setUploadedGenome(genomeData);
+
+                        // Initialize the ML predictor with mock data
+                        const mockFastaContent = `>${genome.id}\nACGTACGT`; // Mock sequence
+                        const predictor = new ResistancePredictor(
+                          mockFastaContent,
+                        );
+
+                        // Run the analysis
+                        predictor.predictResistance().then((predictions) => {
+                          const analysisSummary =
+                            predictor.getAnalysisSummary();
+
+                          const result = {
+                            genomeId: genomeData.id,
+                            genomeName: genomeData.name,
+                            predictions,
+                            analysisSummary,
+                          };
+
+                          setProcessedResult(result);
+                          setIsProcessing(false);
+                          setActiveTab("results");
+                        });
+                      } else {
+                        setIsProcessing(false);
+                      }
+                    }, 3000);
+                  }}
                 />
               </TabsContent>
 
