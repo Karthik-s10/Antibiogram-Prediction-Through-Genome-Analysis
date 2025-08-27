@@ -9,7 +9,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import GenomeUploader from "./GenomeUploader";
 import ResultsDashboard from "./ResultsDashboard";
-import KEGGGenomeSearch from "./KEGGGenomeSearch";
+import GenomeSearch from "./KEGGGenomeSearch";
 import { motion } from "framer-motion";
 import {
   ResistancePredictor,
@@ -135,7 +135,7 @@ const HomePage = () => {
                   Genome Upload
                 </TabsTrigger>
                 <TabsTrigger value="kegg" disabled={isProcessing}>
-                  KEGG Database
+                  Genome Database
                 </TabsTrigger>
                 <TabsTrigger value="results" disabled={!processedResult}>
                   Results Dashboard
@@ -150,7 +150,7 @@ const HomePage = () => {
               </TabsContent>
 
               <TabsContent value="kegg" className="mt-0">
-                <KEGGGenomeSearch
+                <GenomeSearch
                   onGenomeSelect={(genome) => {
                     console.log("Selected KEGG genome:", genome);
                     // You can add logic here to process the selected KEGG genome

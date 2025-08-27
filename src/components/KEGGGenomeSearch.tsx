@@ -52,7 +52,7 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 
-interface KEGGGenome {
+interface GenomeData {
   id: string;
   organism: string;
   species: string;
@@ -63,31 +63,34 @@ interface KEGGGenome {
   genes: number;
   proteins: number;
   description: string;
-  keggUrl: string;
+  source: "KEGG" | "NCBI";
+  keggUrl?: string;
   ncbiId?: string;
+  ncbiAccession?: string;
   gcContent?: number;
   sequenceAvailable: boolean;
 }
 
-interface KEGGGenomeSearchProps {
-  onGenomeSelect?: (genome: KEGGGenome) => void;
-  onSequenceDownload?: (genome: KEGGGenome) => void;
-  onBatchProcess?: (genomes: KEGGGenome[]) => void;
+interface GenomeSearchProps {
+  onGenomeSelect?: (genome: GenomeData) => void;
+  onSequenceDownload?: (genome: GenomeData) => void;
+  onBatchProcess?: (genomes: GenomeData[]) => void;
   className?: string;
 }
 
-const KEGGGenomeSearch = ({
+const GenomeSearch = ({
   onGenomeSelect = () => {},
   onSequenceDownload = () => {},
   onBatchProcess = () => {},
   className = "",
-}: KEGGGenomeSearchProps) => {
+}: GenomeSearchProps) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSpecies, setSelectedSpecies] = useState("all");
   const [selectedVariant, setSelectedVariant] = useState("all");
   const [selectedTaxonomy, setSelectedTaxonomy] = useState("all");
-  const [genomes, setGenomes] = useState<KEGGGenome[]>([]);
-  const [filteredGenomes, setFilteredGenomes] = useState<KEGGGenome[]>([]);
+  const [genomes, setGenomes] = useState<GenomeData[]>([]);
+  const [filteredGenomes, setFilteredGenomes] = useState<GenomeData[]>([]);
+  const [dataSource, setDataSource] = useState<"KEGG" | "NCBI">("KEGG");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [selectedGenomes, setSelectedGenomes] = useState<Set<string>>(
@@ -106,18 +109,22 @@ const KEGGGenomeSearch = ({
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [isBatchProcessing, setIsBatchProcessing] = useState(false);
 
-  // Fetch real KEGG genome data
-  const fetchKeggGenomes = async () => {
+  // Fetch genome data from selected source
+  const fetchGenomes = async () => {
     setIsLoading(true);
     setError("");
 
     try {
-      // In a real implementation, this would be a server endpoint that proxies to KEGG API
+      // In a real implementation, this would be a server endpoint that proxies to KEGG/NCBI API
       // For now, we'll simulate a fetch with a delay
-      const response = await fetch("/api/kegg/genomes");
+      const endpoint =
+        dataSource === "KEGG" ? "/api/kegg/genomes" : "/api/ncbi/genomes";
+      const response = await fetch(endpoint);
 
       if (!response.ok) {
-        throw new Error(`Failed to fetch KEGG genomes: ${response.status}`);
+        throw new Error(
+          `Failed to fetch ${dataSource} genomes: ${response.status}`,
+        );
       }
 
       const data = await response.json();
@@ -125,43 +132,47 @@ const KEGGGenomeSearch = ({
       setFilteredGenomes(data);
 
       // Set filter ranges based on actual data
-      const sizes = data.map((g: KEGGGenome) => g.size / 1000000); // Convert to Mbp
-      const genes = data.map((g: KEGGGenome) => g.genes);
+      const sizes = data.map((g: GenomeData) => g.size / 1000000); // Convert to Mbp
+      const genes = data.map((g: GenomeData) => g.genes);
       const gcContents = data
-        .map((g: KEGGGenome) => g.gcContent)
+        .map((g: GenomeData) => g.gcContent)
         .filter(Boolean);
 
       setSizeRange([Math.min(...sizes), Math.max(...sizes)]);
       setGeneCountRange([Math.min(...genes), Math.max(...genes)]);
       setGcContentRange([Math.min(...gcContents), Math.max(...gcContents)]);
     } catch (err) {
-      console.error("Error fetching KEGG genomes:", err);
+      console.error(`Error fetching ${dataSource} genomes:`, err);
       setError(
-        "Failed to fetch genome data from KEGG API. Using cached data instead.",
+        `Failed to fetch genome data from ${dataSource} API. Using cached data instead.`,
       );
 
       // Fallback to cached data
-      const cachedGenomes = localStorage.getItem("keggGenomes");
+      const cacheKey = dataSource === "KEGG" ? "keggGenomes" : "ncbiGenomes";
+      const cachedGenomes = localStorage.getItem(cacheKey);
       if (cachedGenomes) {
         const parsed = JSON.parse(cachedGenomes);
         setGenomes(parsed);
         setFilteredGenomes(parsed);
       } else {
         // If no cached data, use the sample data
-        const sampleGenomes = getSampleGenomes();
+        const sampleGenomes =
+          dataSource === "KEGG"
+            ? getSampleKeggGenomes()
+            : getSampleNcbiGenomes();
         setGenomes(sampleGenomes);
         setFilteredGenomes(sampleGenomes);
 
         // Cache the sample data
-        localStorage.setItem("keggGenomes", JSON.stringify(sampleGenomes));
+        localStorage.setItem(cacheKey, JSON.stringify(sampleGenomes));
       }
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Sample genomes for fallback
-  const getSampleGenomes = (): KEGGGenome[] => [
+  // Sample KEGG genomes for fallback
+  const getSampleKeggGenomes = (): GenomeData[] => [
     {
       id: "kpn",
       organism: "Klebsiella pneumoniae",
@@ -174,6 +185,7 @@ const KEGGGenomeSearch = ({
       genes: 5126,
       proteins: 4960,
       description: "Gram-negative, encapsulated, non-motile bacterium",
+      source: "KEGG",
       keggUrl: "https://www.kegg.jp/kegg-bin/show_organism?org=kpn",
       ncbiId: "272620",
       gcContent: 57.2,
@@ -192,6 +204,7 @@ const KEGGGenomeSearch = ({
       proteins: 4285,
       description:
         "Model organism for bacterial genetics and molecular biology",
+      source: "KEGG",
       keggUrl: "https://www.kegg.jp/kegg-bin/show_organism?org=eco",
       ncbiId: "511145",
       gcContent: 50.8,
@@ -209,6 +222,7 @@ const KEGGGenomeSearch = ({
       proteins: 5563,
       description:
         "Opportunistic pathogen with intrinsic antibiotic resistance",
+      source: "KEGG",
       keggUrl: "https://www.kegg.jp/kegg-bin/show_organism?org=pae",
       ncbiId: "208964",
       gcContent: 66.6,
@@ -226,6 +240,7 @@ const KEGGGenomeSearch = ({
       proteins: 2593,
       description:
         "Gram-positive pathogen, MRSA strains are multidrug-resistant",
+      source: "KEGG",
       keggUrl: "https://www.kegg.jp/kegg-bin/show_organism?org=sau",
       ncbiId: "158878",
       gcContent: 32.8,
@@ -241,6 +256,7 @@ const KEGGGenomeSearch = ({
       genes: 3113,
       proteins: 3264,
       description: "Vancomycin-resistant enterococcus (VRE) reference strain",
+      source: "KEGG",
       keggUrl: "https://www.kegg.jp/kegg-bin/show_organism?org=efa",
       ncbiId: "226185",
       gcContent: 37.4,
@@ -257,6 +273,7 @@ const KEGGGenomeSearch = ({
       genes: 3830,
       proteins: 3785,
       description: "Multidrug-resistant nosocomial pathogen",
+      source: "KEGG",
       keggUrl: "https://www.kegg.jp/kegg-bin/show_organism?org=aba",
       ncbiId: "400667",
       gcContent: 39.0,
@@ -264,9 +281,96 @@ const KEGGGenomeSearch = ({
     },
   ];
 
+  // Sample NCBI genomes for fallback
+  const getSampleNcbiGenomes = (): GenomeData[] => [
+    {
+      id: "GCF_000393015.1",
+      organism: "Enterococcus faecalis ATCC 29212",
+      species: "E. faecalis",
+      strain: "ATCC 29212",
+      taxonomy: "Bacteria; Firmicutes; Bacilli; Lactobacillales",
+      size: 2939973,
+      genes: 2826,
+      proteins: 2705,
+      description:
+        "Standard reference strain for antimicrobial susceptibility testing",
+      source: "NCBI",
+      ncbiId: "1201292",
+      ncbiAccession: "GCF_000393015.1",
+      gcContent: 37.5,
+      sequenceAvailable: true,
+    },
+    {
+      id: "GCF_000006945.2",
+      organism:
+        "Salmonella enterica subsp. enterica serovar Typhimurium str. LT2",
+      species: "S. enterica",
+      strain: "LT2",
+      taxonomy:
+        "Bacteria; Proteobacteria; Gammaproteobacteria; Enterobacterales",
+      size: 4857432,
+      genes: 4620,
+      proteins: 4423,
+      description: "Model organism for Salmonella pathogenesis studies",
+      source: "NCBI",
+      ncbiId: "99287",
+      ncbiAccession: "GCF_000006945.2",
+      gcContent: 52.2,
+      sequenceAvailable: true,
+    },
+    {
+      id: "GCF_000013425.1",
+      organism: "Streptococcus pneumoniae TIGR4",
+      species: "S. pneumoniae",
+      strain: "TIGR4",
+      taxonomy: "Bacteria; Firmicutes; Bacilli; Lactobacillales",
+      size: 2160842,
+      genes: 2236,
+      proteins: 2105,
+      description: "Virulent clinical isolate, important respiratory pathogen",
+      source: "NCBI",
+      ncbiId: "170187",
+      ncbiAccession: "GCF_000013425.1",
+      gcContent: 39.7,
+      sequenceAvailable: true,
+    },
+    {
+      id: "GCF_000008865.2",
+      organism: "Mycobacterium tuberculosis H37Rv",
+      species: "M. tuberculosis",
+      strain: "H37Rv",
+      taxonomy: "Bacteria; Actinobacteria; Actinomycetia; Mycobacteriales",
+      size: 4411532,
+      genes: 4111,
+      proteins: 3906,
+      description: "Reference strain for tuberculosis research",
+      source: "NCBI",
+      ncbiId: "83332",
+      ncbiAccession: "GCF_000008865.2",
+      gcContent: 65.6,
+      sequenceAvailable: true,
+    },
+    {
+      id: "GCF_000017085.1",
+      organism: "Neisseria gonorrhoeae FA 1090",
+      species: "N. gonorrhoeae",
+      strain: "FA 1090",
+      taxonomy: "Bacteria; Proteobacteria; Betaproteobacteria; Neisseriales",
+      size: 2153922,
+      genes: 2185,
+      proteins: 2002,
+      description: "Reference strain for gonorrhea research",
+      source: "NCBI",
+      ncbiId: "242231",
+      ncbiAccession: "GCF_000017085.1",
+      gcContent: 52.7,
+      sequenceAvailable: true,
+    },
+  ];
+
   useEffect(() => {
-    fetchKeggGenomes();
-  }, []);
+    fetchGenomes();
+  }, [dataSource]);
 
   useEffect(() => {
     // Filter genomes based on search criteria and advanced filters
@@ -330,7 +434,7 @@ const KEGGGenomeSearch = ({
     genomes,
   ]);
 
-  const handleGenomeSelect = (genome: KEGGGenome) => {
+  const handleGenomeSelect = (genome: GenomeData) => {
     const newSelected = new Set(selectedGenomes);
     if (newSelected.has(genome.id)) {
       newSelected.delete(genome.id);
@@ -341,11 +445,15 @@ const KEGGGenomeSearch = ({
     onGenomeSelect(genome);
   };
 
-  const handleSequenceDownload = async (genome: KEGGGenome) => {
+  const handleSequenceDownload = async (genome: GenomeData) => {
     setIsLoading(true);
     try {
-      // Fetch sequence from KEGG API
-      const response = await fetch(`/api/kegg/sequence/${genome.id}`);
+      // Fetch sequence from appropriate API
+      const endpoint =
+        genome.source === "KEGG"
+          ? `/api/kegg/sequence/${genome.id}`
+          : `/api/ncbi/sequence/${genome.ncbiAccession || genome.id}`;
+      const response = await fetch(endpoint);
 
       if (!response.ok) {
         throw new Error(`Failed to fetch sequence: ${response.status}`);
@@ -426,7 +534,7 @@ const KEGGGenomeSearch = ({
     return sequence;
   };
 
-  const getUniqueValues = (key: keyof KEGGGenome) => {
+  const getUniqueValues = (key: keyof GenomeData) => {
     const values = genomes
       .map((genome) => genome[key])
       .filter((value) => value !== undefined && value !== null)
@@ -450,11 +558,11 @@ const KEGGGenomeSearch = ({
           <div>
             <CardTitle className="text-2xl font-bold flex items-center text-blue-900">
               <Database className="mr-2 h-6 w-6" />
-              KEGG Genome Database
+              Genome Database Search
             </CardTitle>
             <CardDescription className="text-blue-700">
-              Search and access bacterial genomes from the KEGG database for
-              antibiotic resistance analysis
+              Search and access bacterial genomes from KEGG and NCBI databases
+              for antibiotic resistance analysis
             </CardDescription>
           </div>
           <div className="flex items-center space-x-2">
@@ -468,14 +576,19 @@ const KEGGGenomeSearch = ({
                     variant="outline"
                     size="sm"
                     onClick={() =>
-                      window.open("https://www.kegg.jp/kegg/genome/", "_blank")
+                      window.open(
+                        dataSource === "KEGG"
+                          ? "https://www.kegg.jp/kegg/genome/"
+                          : "https://www.ncbi.nlm.nih.gov/datasets/genome/",
+                        "_blank",
+                      )
                     }
                   >
                     <ExternalLink className="h-4 w-4" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Visit KEGG Genome Database</p>
+                  <p>Visit {dataSource} Genome Database</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -483,6 +596,23 @@ const KEGGGenomeSearch = ({
         </div>
       </CardHeader>
       <CardContent>
+        <div className="mb-6 flex justify-center">
+          <div className="inline-flex items-center rounded-lg border border-blue-200 bg-white p-1">
+            <button
+              className={`px-4 py-2 rounded-md ${dataSource === "KEGG" ? "bg-blue-100 text-blue-800 font-medium" : "text-gray-600"}`}
+              onClick={() => setDataSource("KEGG")}
+            >
+              KEGG Database
+            </button>
+            <button
+              className={`px-4 py-2 rounded-md ${dataSource === "NCBI" ? "bg-blue-100 text-blue-800 font-medium" : "text-gray-600"}`}
+              onClick={() => setDataSource("NCBI")}
+            >
+              NCBI Datasets
+            </button>
+          </div>
+        </div>
+
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
           <TabsList className="grid w-full grid-cols-2 mb-6">
             <TabsTrigger value="search" className="flex items-center">
@@ -821,15 +951,28 @@ const KEGGGenomeSearch = ({
                                 <Button
                                   variant="outline"
                                   size="sm"
-                                  onClick={() =>
-                                    window.open(genome.keggUrl, "_blank")
-                                  }
+                                  onClick={() => {
+                                    if (
+                                      genome.source === "KEGG" &&
+                                      genome.keggUrl
+                                    ) {
+                                      window.open(genome.keggUrl, "_blank");
+                                    } else if (
+                                      genome.source === "NCBI" &&
+                                      genome.ncbiAccession
+                                    ) {
+                                      window.open(
+                                        `https://www.ncbi.nlm.nih.gov/datasets/genome/${genome.ncbiAccession}`,
+                                        "_blank",
+                                      );
+                                    }
+                                  }}
                                 >
                                   <ExternalLink className="h-4 w-4" />
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent>
-                                <p>View in KEGG database</p>
+                                <p>View in {genome.source} database</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
@@ -922,9 +1065,22 @@ const KEGGGenomeSearch = ({
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() =>
-                                window.open(genome.keggUrl, "_blank")
-                              }
+                              onClick={() => {
+                                if (
+                                  genome.source === "KEGG" &&
+                                  genome.keggUrl
+                                ) {
+                                  window.open(genome.keggUrl, "_blank");
+                                } else if (
+                                  genome.source === "NCBI" &&
+                                  genome.ncbiAccession
+                                ) {
+                                  window.open(
+                                    `https://www.ncbi.nlm.nih.gov/datasets/genome/${genome.ncbiAccession}`,
+                                    "_blank",
+                                  );
+                                }
+                              }}
                             >
                               <ExternalLink className="h-4 w-4" />
                             </Button>
@@ -943,4 +1099,4 @@ const KEGGGenomeSearch = ({
   );
 };
 
-export default KEGGGenomeSearch;
+export default GenomeSearch;
