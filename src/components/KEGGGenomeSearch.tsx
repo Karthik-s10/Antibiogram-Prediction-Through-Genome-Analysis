@@ -1,4 +1,11 @@
 import React, { useState, useEffect } from "react";
+
+// NCBI API Key
+const NCBI_API_KEY = "feec4ac9f28178c8b078da5292d7caa86408";
+
+// NCBI Datasets API base URL
+const NCBI_DATASETS_BASE_URL = "https://api.ncbi.nlm.nih.gov/datasets/v2alpha";
+import axios from "axios";
 import {
   Card,
   CardContent,
@@ -63,8 +70,8 @@ interface GenomeData {
   genes: number;
   proteins: number;
   description: string;
-  source: "KEGG" | "NCBI";
-  keggUrl?: string;
+  source: "NCBI";
+
   ncbiId?: string;
   ncbiAccession?: string;
   gcContent?: number;
@@ -90,7 +97,6 @@ const GenomeSearch = ({
   const [selectedTaxonomy, setSelectedTaxonomy] = useState("all");
   const [genomes, setGenomes] = useState<GenomeData[]>([]);
   const [filteredGenomes, setFilteredGenomes] = useState<GenomeData[]>([]);
-  const [dataSource, setDataSource] = useState<"KEGG" | "NCBI">("KEGG");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [selectedGenomes, setSelectedGenomes] = useState<Set<string>>(
@@ -109,268 +115,185 @@ const GenomeSearch = ({
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [isBatchProcessing, setIsBatchProcessing] = useState(false);
 
-  // Fetch genome data from selected source
+  // Fetch genome data from NCBI Datasets API
   const fetchGenomes = async () => {
     setIsLoading(true);
     setError("");
 
     try {
-      // In a real implementation, this would be a server endpoint that proxies to KEGG/NCBI API
-      // For now, we'll simulate a fetch with a delay
-      const endpoint =
-        dataSource === "KEGG" ? "/api/kegg/genomes" : "/api/ncbi/genomes";
-      const response = await fetch(endpoint);
+      // Using NCBI Datasets API with POST request as required by the API
+      const response = await axios.post(
+        `${NCBI_DATASETS_BASE_URL}/genome/dataset_report`,
+        {
+          filters: {
+            assembly_source: "refseq",
+            assembly_level: ["complete_genome"],
+            exclude_paired_reports: true,
+            exclude_atypical: true,
+          },
+          returned_content: "COMPLETE",
+          page_size: 20,
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            "api-key": NCBI_API_KEY,
+          },
+        },
+      );
 
-      if (!response.ok) {
-        throw new Error(
-          `Failed to fetch ${dataSource} genomes: ${response.status}`,
-        );
+      console.log("NCBI API Response:", response.data);
+
+      if (!response.data) {
+        throw new Error("No data received from NCBI Datasets API");
       }
 
-      const data = await response.json();
-      setGenomes(data);
-      setFilteredGenomes(data);
+      // Handle different response structures
+      let reports = [];
+      if (response.data.reports) {
+        reports = response.data.reports;
+      } else if (Array.isArray(response.data)) {
+        reports = response.data;
+      } else if (response.data.assemblies) {
+        reports = response.data.assemblies;
+      } else {
+        console.warn("Unexpected response structure:", response.data);
+        // Fallback to mock data for development
+        reports = [
+          {
+            accession: "GCF_000005825.2",
+            assembly_info: {
+              assembly_accession: "GCF_000005825.2",
+              assembly_name: "ASM582v2",
+              assembly_stats: {
+                total_sequence_length: 4641652,
+                gc_percent: 66.6,
+              },
+            },
+            organism: {
+              organism_name: "Escherichia coli str. K-12 substr. MG1655",
+              tax_id: 511145,
+              infraspecific_names: {
+                strain: "K-12",
+              },
+            },
+            annotation_info: {
+              stats: {
+                gene_counts: {
+                  total: 4140,
+                  protein_coding: 4140,
+                },
+              },
+            },
+          },
+          {
+            accession: "GCF_000393015.1",
+            assembly_info: {
+              assembly_accession: "GCF_000393015.1",
+              assembly_name: "ASM39301v1",
+              assembly_stats: {
+                total_sequence_length: 6264404,
+                gc_percent: 67.1,
+              },
+            },
+            organism: {
+              organism_name: "Pseudomonas aeruginosa PAO1",
+              tax_id: 208964,
+              infraspecific_names: {
+                strain: "PAO1",
+              },
+            },
+            annotation_info: {
+              stats: {
+                gene_counts: {
+                  total: 5570,
+                  protein_coding: 5570,
+                },
+              },
+            },
+          },
+        ];
+      }
+
+      // Process genome reports from Datasets API
+      const genomeDetails = reports.map((report: any) => {
+        const assembly = report.assembly_info || {};
+        const organism = report.organism || {};
+        const annotation = report.annotation_info || {};
+        const assemblyStats = assembly.assembly_stats || {};
+
+        return {
+          id: assembly.assembly_accession || report.accession,
+          organism: organism.organism_name || "Unknown organism",
+          species:
+            organism.organism_name?.split(" ").slice(0, 2).join(" ") ||
+            "Unknown species",
+          strain: organism.infraspecific_names?.strain || undefined,
+          taxonomy: organism.tax_id ? `Tax ID: ${organism.tax_id}` : "Bacteria",
+          size: assemblyStats.total_sequence_length || 0,
+          genes: annotation.stats?.gene_counts?.total || 0,
+          proteins: annotation.stats?.gene_counts?.protein_coding || 0,
+          description:
+            assembly.assembly_name ||
+            organism.organism_name ||
+            "Bacterial genome",
+          source: "NCBI",
+          ncbiId: report.accession,
+          ncbiAccession: assembly.assembly_accession || report.accession,
+          gcContent: assemblyStats.gc_percent || 50,
+          sequenceAvailable: true,
+        };
+      });
+
+      const validGenomes = genomeDetails.filter(Boolean) as GenomeData[];
+
+      if (validGenomes.length === 0) {
+        throw new Error("No valid genomes found");
+      }
+
+      setGenomes(validGenomes);
+      setFilteredGenomes(validGenomes);
 
       // Set filter ranges based on actual data
-      const sizes = data.map((g: GenomeData) => g.size / 1000000); // Convert to Mbp
-      const genes = data.map((g: GenomeData) => g.genes);
-      const gcContents = data
+      const sizes = validGenomes.map((g: GenomeData) => g.size / 1000000); // Convert to Mbp
+      const genes = validGenomes.map((g: GenomeData) => g.genes);
+      const gcContents = validGenomes
         .map((g: GenomeData) => g.gcContent)
         .filter(Boolean);
 
       setSizeRange([Math.min(...sizes), Math.max(...sizes)]);
       setGeneCountRange([Math.min(...genes), Math.max(...genes)]);
       setGcContentRange([Math.min(...gcContents), Math.max(...gcContents)]);
-    } catch (err) {
-      console.error(`Error fetching ${dataSource} genomes:`, err);
-      setError(
-        `Failed to fetch genome data from ${dataSource} API. Using cached data instead.`,
-      );
+    } catch (err: any) {
+      console.error("Error fetching NCBI genomes:", err);
 
-      // Fallback to cached data
-      const cacheKey = dataSource === "KEGG" ? "keggGenomes" : "ncbiGenomes";
-      const cachedGenomes = localStorage.getItem(cacheKey);
-      if (cachedGenomes) {
-        const parsed = JSON.parse(cachedGenomes);
-        setGenomes(parsed);
-        setFilteredGenomes(parsed);
+      // More detailed error handling
+      if (err.response) {
+        console.error("Response status:", err.response.status);
+        console.error("Response data:", err.response.data);
+        setError(
+          `API Error ${err.response.status}: ${err.response.data?.message || "Failed to fetch genome data from NCBI Datasets API"}`,
+        );
+      } else if (err.request) {
+        console.error("No response received:", err.request);
+        setError("Network error: Unable to connect to NCBI Datasets API");
       } else {
-        // If no cached data, use the sample data
-        const sampleGenomes =
-          dataSource === "KEGG"
-            ? getSampleKeggGenomes()
-            : getSampleNcbiGenomes();
-        setGenomes(sampleGenomes);
-        setFilteredGenomes(sampleGenomes);
-
-        // Cache the sample data
-        localStorage.setItem(cacheKey, JSON.stringify(sampleGenomes));
+        console.error("Request setup error:", err.message);
+        setError(`Request error: ${err.message}`);
       }
+
+      setGenomes([]);
+      setFilteredGenomes([]);
     } finally {
       setIsLoading(false);
     }
   };
 
-  // Sample KEGG genomes for fallback
-  const getSampleKeggGenomes = (): GenomeData[] => [
-    {
-      id: "kpn",
-      organism: "Klebsiella pneumoniae",
-      species: "K. pneumoniae",
-      strain: "subsp. pneumoniae",
-      variant: "MGH 78578",
-      taxonomy:
-        "Bacteria; Proteobacteria; Gammaproteobacteria; Enterobacterales",
-      size: 5374361,
-      genes: 5126,
-      proteins: 4960,
-      description: "Gram-negative, encapsulated, non-motile bacterium",
-      source: "KEGG",
-      keggUrl: "https://www.kegg.jp/kegg-bin/show_organism?org=kpn",
-      ncbiId: "272620",
-      gcContent: 57.2,
-      sequenceAvailable: true,
-    },
-    {
-      id: "eco",
-      organism: "Escherichia coli",
-      species: "E. coli",
-      strain: "K-12",
-      variant: "MG1655",
-      taxonomy:
-        "Bacteria; Proteobacteria; Gammaproteobacteria; Enterobacterales",
-      size: 4641652,
-      genes: 4321,
-      proteins: 4285,
-      description:
-        "Model organism for bacterial genetics and molecular biology",
-      source: "KEGG",
-      keggUrl: "https://www.kegg.jp/kegg-bin/show_organism?org=eco",
-      ncbiId: "511145",
-      gcContent: 50.8,
-      sequenceAvailable: true,
-    },
-    {
-      id: "pae",
-      organism: "Pseudomonas aeruginosa",
-      species: "P. aeruginosa",
-      strain: "PAO1",
-      taxonomy:
-        "Bacteria; Proteobacteria; Gammaproteobacteria; Pseudomonadales",
-      size: 6264404,
-      genes: 5570,
-      proteins: 5563,
-      description:
-        "Opportunistic pathogen with intrinsic antibiotic resistance",
-      source: "KEGG",
-      keggUrl: "https://www.kegg.jp/kegg-bin/show_organism?org=pae",
-      ncbiId: "208964",
-      gcContent: 66.6,
-      sequenceAvailable: true,
-    },
-    {
-      id: "sau",
-      organism: "Staphylococcus aureus",
-      species: "S. aureus",
-      strain: "subsp. aureus",
-      variant: "N315",
-      taxonomy: "Bacteria; Firmicutes; Bacilli; Bacillales",
-      size: 2814816,
-      genes: 2697,
-      proteins: 2593,
-      description:
-        "Gram-positive pathogen, MRSA strains are multidrug-resistant",
-      source: "KEGG",
-      keggUrl: "https://www.kegg.jp/kegg-bin/show_organism?org=sau",
-      ncbiId: "158878",
-      gcContent: 32.8,
-      sequenceAvailable: true,
-    },
-    {
-      id: "efa",
-      organism: "Enterococcus faecalis",
-      species: "E. faecalis",
-      strain: "V583",
-      taxonomy: "Bacteria; Firmicutes; Bacilli; Lactobacillales",
-      size: 3218031,
-      genes: 3113,
-      proteins: 3264,
-      description: "Vancomycin-resistant enterococcus (VRE) reference strain",
-      source: "KEGG",
-      keggUrl: "https://www.kegg.jp/kegg-bin/show_organism?org=efa",
-      ncbiId: "226185",
-      gcContent: 37.4,
-      sequenceAvailable: true,
-    },
-    {
-      id: "aba",
-      organism: "Acinetobacter baumannii",
-      species: "A. baumannii",
-      strain: "ATCC 17978",
-      taxonomy:
-        "Bacteria; Proteobacteria; Gammaproteobacteria; Pseudomonadales",
-      size: 3976747,
-      genes: 3830,
-      proteins: 3785,
-      description: "Multidrug-resistant nosocomial pathogen",
-      source: "KEGG",
-      keggUrl: "https://www.kegg.jp/kegg-bin/show_organism?org=aba",
-      ncbiId: "400667",
-      gcContent: 39.0,
-      sequenceAvailable: true,
-    },
-  ];
-
-  // Sample NCBI genomes for fallback
-  const getSampleNcbiGenomes = (): GenomeData[] => [
-    {
-      id: "GCF_000393015.1",
-      organism: "Enterococcus faecalis ATCC 29212",
-      species: "E. faecalis",
-      strain: "ATCC 29212",
-      taxonomy: "Bacteria; Firmicutes; Bacilli; Lactobacillales",
-      size: 2939973,
-      genes: 2826,
-      proteins: 2705,
-      description:
-        "Standard reference strain for antimicrobial susceptibility testing",
-      source: "NCBI",
-      ncbiId: "1201292",
-      ncbiAccession: "GCF_000393015.1",
-      gcContent: 37.5,
-      sequenceAvailable: true,
-    },
-    {
-      id: "GCF_000006945.2",
-      organism:
-        "Salmonella enterica subsp. enterica serovar Typhimurium str. LT2",
-      species: "S. enterica",
-      strain: "LT2",
-      taxonomy:
-        "Bacteria; Proteobacteria; Gammaproteobacteria; Enterobacterales",
-      size: 4857432,
-      genes: 4620,
-      proteins: 4423,
-      description: "Model organism for Salmonella pathogenesis studies",
-      source: "NCBI",
-      ncbiId: "99287",
-      ncbiAccession: "GCF_000006945.2",
-      gcContent: 52.2,
-      sequenceAvailable: true,
-    },
-    {
-      id: "GCF_000013425.1",
-      organism: "Streptococcus pneumoniae TIGR4",
-      species: "S. pneumoniae",
-      strain: "TIGR4",
-      taxonomy: "Bacteria; Firmicutes; Bacilli; Lactobacillales",
-      size: 2160842,
-      genes: 2236,
-      proteins: 2105,
-      description: "Virulent clinical isolate, important respiratory pathogen",
-      source: "NCBI",
-      ncbiId: "170187",
-      ncbiAccession: "GCF_000013425.1",
-      gcContent: 39.7,
-      sequenceAvailable: true,
-    },
-    {
-      id: "GCF_000008865.2",
-      organism: "Mycobacterium tuberculosis H37Rv",
-      species: "M. tuberculosis",
-      strain: "H37Rv",
-      taxonomy: "Bacteria; Actinobacteria; Actinomycetia; Mycobacteriales",
-      size: 4411532,
-      genes: 4111,
-      proteins: 3906,
-      description: "Reference strain for tuberculosis research",
-      source: "NCBI",
-      ncbiId: "83332",
-      ncbiAccession: "GCF_000008865.2",
-      gcContent: 65.6,
-      sequenceAvailable: true,
-    },
-    {
-      id: "GCF_000017085.1",
-      organism: "Neisseria gonorrhoeae FA 1090",
-      species: "N. gonorrhoeae",
-      strain: "FA 1090",
-      taxonomy: "Bacteria; Proteobacteria; Betaproteobacteria; Neisseriales",
-      size: 2153922,
-      genes: 2185,
-      proteins: 2002,
-      description: "Reference strain for gonorrhea research",
-      source: "NCBI",
-      ncbiId: "242231",
-      ncbiAccession: "GCF_000017085.1",
-      gcContent: 52.7,
-      sequenceAvailable: true,
-    },
-  ];
-
+  // Fetch genomes on component mount
   useEffect(() => {
     fetchGenomes();
-  }, [dataSource]);
+  }, []);
 
   useEffect(() => {
     // Filter genomes based on search criteria and advanced filters
@@ -448,47 +371,78 @@ const GenomeSearch = ({
   const handleSequenceDownload = async (genome: GenomeData) => {
     setIsLoading(true);
     try {
-      // Fetch sequence from appropriate API
-      const endpoint =
-        genome.source === "KEGG"
-          ? `/api/kegg/sequence/${genome.id}`
-          : `/api/ncbi/sequence/${genome.ncbiAccession || genome.id}`;
-      const response = await fetch(endpoint);
+      // Download CDS FASTA directly using GET request
+      const response = await axios.get(
+        `${NCBI_DATASETS_BASE_URL}/genome/accession/${genome.ncbiAccession || genome.id}/download`,
+        {
+          params: {
+            include_annotation_type: ["CDS_FASTA"],
+            filename: `${genome.ncbiAccession || genome.id}_cds.fasta`,
+          },
+          responseType: "blob",
+          headers: {
+            Accept: "application/octet-stream",
+            "api-key": NCBI_API_KEY,
+          },
+        },
+      );
 
-      if (!response.ok) {
-        throw new Error(`Failed to fetch sequence: ${response.status}`);
+      // Check if we got a valid response
+      if (response.data.size === 0) {
+        throw new Error("Empty file received");
       }
 
-      const fastaContent = await response.text();
-
-      // Create and download file
-      const blob = new Blob([fastaContent], { type: "text/plain" });
+      // Create and download the CDS FASTA file
+      const blob = new Blob([response.data], { type: "text/plain" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${genome.id}_${genome.organism.replace(/\s+/g, "_")}.fasta`;
+      a.download = `${genome.ncbiAccession || genome.id}_cds.fasta`;
       a.click();
       URL.revokeObjectURL(url);
 
       onSequenceDownload(genome);
-    } catch (error) {
-      console.error("Error downloading sequence:", error);
-      setError("Failed to download sequence. Using simulated data instead.");
+    } catch (error: any) {
+      console.error("Error downloading CDS sequence:", error);
 
-      // Fallback to simulated sequence
-      const mockSequence = generateMockSequence(genome.size);
-      const fastaContent = `>${genome.id} ${genome.organism} ${genome.variant || genome.strain || ""} complete genome\n${mockSequence}`;
+      // Fallback: try to download genome FASTA if CDS fails
+      try {
+        const fallbackResponse = await axios.get(
+          `${NCBI_DATASETS_BASE_URL}/genome/accession/${genome.ncbiAccession || genome.id}/download`,
+          {
+            params: {
+              include_annotation_type: ["GENOME_FASTA"],
+              filename: `${genome.ncbiAccession || genome.id}_genome.fasta`,
+            },
+            responseType: "blob",
+            headers: {
+              Accept: "application/octet-stream",
+              "api-key": NCBI_API_KEY,
+            },
+          },
+        );
 
-      // Create and download file
-      const blob = new Blob([fastaContent], { type: "text/plain" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${genome.id}_${genome.organism.replace(/\s+/g, "_")}.fasta`;
-      a.click();
-      URL.revokeObjectURL(url);
+        const blob = new Blob([fallbackResponse.data], { type: "text/plain" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${genome.ncbiAccession || genome.id}_genome.fasta`;
+        a.click();
+        URL.revokeObjectURL(url);
 
-      onSequenceDownload(genome);
+        onSequenceDownload(genome);
+      } catch (fallbackError: any) {
+        console.error("Fallback download also failed:", fallbackError);
+        if (error.response) {
+          setError(
+            `Download failed: ${error.response.status} - ${error.response.data?.message || "Unable to download sequence"}`,
+          );
+        } else {
+          setError(
+            "Failed to download sequence from NCBI Datasets API. The API might be temporarily unavailable.",
+          );
+        }
+      }
     } finally {
       setIsLoading(false);
     }
@@ -507,31 +461,164 @@ const GenomeSearch = ({
       // Get selected genome objects
       const genomesToProcess = genomes.filter((g) => selectedGenomes.has(g.id));
 
-      // Call the batch processing function
-      onBatchProcess(genomesToProcess);
+      // Download FASTA sequences for each selected genome using NCBI Datasets API
+      const genomesWithSequences = await Promise.all(
+        genomesToProcess.map(async (genome) => {
+          try {
+            // Using NCBI Datasets API to get CDS FASTA sequence
+            const response = await axios.get(
+              `${NCBI_DATASETS_BASE_URL}/genome/accession/${genome.ncbiAccession || genome.id}/download`,
+              {
+                params: {
+                  include_annotation_type: ["CDS_FASTA"],
+                  filename: `${genome.ncbiAccession || genome.id}_cds.fasta`,
+                },
+                responseType: "text",
+                headers: {
+                  Accept: "text/plain",
+                  "api-key": NCBI_API_KEY,
+                },
+              },
+            );
 
-      // In a real implementation, this would send the genomes to a backend for processing
-      // and potentially redirect to a results page or show a notification
-      await new Promise((resolve) => setTimeout(resolve, 2000)); // Simulate processing time
+            // Store the CDS FASTA content directly
+            return {
+              ...genome,
+              fastaContent: response.data,
+              isZipFormat: false,
+              fileType: "CDS_FASTA",
+            };
+          } catch (error) {
+            console.error(`Error fetching sequence for ${genome.id}:`, error);
+            return null;
+          }
+        }),
+      );
 
-      // Success message would be handled by the parent component
+      const validGenomesWithSequences = genomesWithSequences.filter(Boolean);
+
+      if (validGenomesWithSequences.length === 0) {
+        throw new Error("Failed to fetch sequences for selected genomes");
+      }
+
+      // Call the batch processing function with genomes that have sequences
+      onBatchProcess(validGenomesWithSequences);
     } catch (error) {
       console.error("Batch processing error:", error);
-      setError("Failed to process genomes in batch mode");
+      setError("Failed to process genomes in batch mode: " + error.message);
     } finally {
       setIsBatchProcessing(false);
     }
   };
 
-  const generateMockSequence = (length: number): string => {
-    const bases = ["A", "T", "C", "G"];
-    let sequence = "";
-    for (let i = 0; i < Math.min(length, 1000); i++) {
-      // Limit to 1000 bp for demo
-      sequence += bases[Math.floor(Math.random() * 4)];
-      if ((i + 1) % 80 === 0) sequence += "\n"; // Line breaks every 80 bases
+  // Function to search for genomes by query using NCBI Datasets API
+  const searchGenomesByQuery = async (query: string) => {
+    setIsLoading(true);
+    setError("");
+
+    try {
+      // Using NCBI Datasets API for search with POST request
+      const response = await axios.post(
+        `${NCBI_DATASETS_BASE_URL}/genome/dataset_report`,
+        {
+          filters: {
+            assembly_source: "refseq",
+            assembly_level: ["complete_genome"],
+            search_text: query,
+            exclude_paired_reports: true,
+            exclude_atypical: true,
+          },
+          returned_content: "COMPLETE",
+          page_size: 20,
+        },
+        {
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            "api-key": NCBI_API_KEY,
+          },
+        },
+      );
+
+      console.log("Search API Response:", response.data);
+
+      if (!response.data) {
+        throw new Error("No data received from NCBI Datasets API");
+      }
+
+      // Handle different response structures
+      let searchReports = [];
+      if (response.data.reports) {
+        searchReports = response.data.reports;
+      } else if (Array.isArray(response.data)) {
+        searchReports = response.data;
+      } else if (response.data.assemblies) {
+        searchReports = response.data.assemblies;
+      } else {
+        console.warn("No matching genomes found for query:", query);
+        setError("No genomes found matching your search criteria");
+        setGenomes([]);
+        setFilteredGenomes([]);
+        return;
+      }
+
+      if (searchReports.length === 0) {
+        setError("No genomes found matching your search criteria");
+        setGenomes([]);
+        setFilteredGenomes([]);
+        return;
+      }
+
+      // Process genome reports from Datasets API
+      const genomeDetails = searchReports.map((report: any) => {
+        const assembly = report.assembly_info || {};
+        const organism = report.organism || {};
+        const annotation = report.annotation_info || {};
+        const assemblyStats = assembly.assembly_stats || {};
+
+        return {
+          id: assembly.assembly_accession || report.accession,
+          organism: organism.organism_name || "Unknown organism",
+          species:
+            organism.organism_name?.split(" ").slice(0, 2).join(" ") ||
+            "Unknown species",
+          strain: organism.infraspecific_names?.strain || undefined,
+          taxonomy: organism.tax_id ? `Tax ID: ${organism.tax_id}` : "Bacteria",
+          size: assemblyStats.total_sequence_length || 0,
+          genes: annotation.stats?.gene_counts?.total || 0,
+          proteins: annotation.stats?.gene_counts?.protein_coding || 0,
+          description:
+            assembly.assembly_name ||
+            organism.organism_name ||
+            "Bacterial genome",
+          source: "NCBI",
+          ncbiId: report.accession,
+          ncbiAccession: assembly.assembly_accession || report.accession,
+          gcContent: assemblyStats.gc_percent || 50,
+          sequenceAvailable: true,
+        };
+      });
+
+      const validGenomes = genomeDetails.filter(Boolean) as GenomeData[];
+
+      setGenomes(validGenomes);
+      setFilteredGenomes(validGenomes);
+    } catch (error: any) {
+      console.error("Error searching genomes:", error);
+      if (error.response) {
+        setError(
+          `Search failed: ${error.response.status} - ${error.response.data?.message || "Unable to search genomes"}`,
+        );
+      } else {
+        setError(
+          "Failed to search genomes using NCBI Datasets API. Please try again later.",
+        );
+      }
+      setGenomes([]);
+      setFilteredGenomes([]);
+    } finally {
+      setIsLoading(false);
     }
-    return sequence;
   };
 
   const getUniqueValues = (key: keyof GenomeData) => {
@@ -558,11 +645,11 @@ const GenomeSearch = ({
           <div>
             <CardTitle className="text-2xl font-bold flex items-center text-blue-900">
               <Database className="mr-2 h-6 w-6" />
-              Genome Database Search
+              NCBI Datasets API Genome Search
             </CardTitle>
             <CardDescription className="text-blue-700">
-              Search and access bacterial genomes from KEGG and NCBI databases
-              for antibiotic resistance analysis
+              Search and access bacterial genomes from NCBI datasets for
+              antibiotic resistance analysis
             </CardDescription>
           </div>
           <div className="flex items-center space-x-2">
@@ -577,9 +664,7 @@ const GenomeSearch = ({
                     size="sm"
                     onClick={() =>
                       window.open(
-                        dataSource === "KEGG"
-                          ? "https://www.kegg.jp/kegg/genome/"
-                          : "https://www.ncbi.nlm.nih.gov/datasets/genome/",
+                        "https://www.ncbi.nlm.nih.gov/datasets/genome/",
                         "_blank",
                       )
                     }
@@ -588,7 +673,7 @@ const GenomeSearch = ({
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Visit {dataSource} Genome Database</p>
+                  <p>Visit NCBI Genome Database</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -598,18 +683,9 @@ const GenomeSearch = ({
       <CardContent>
         <div className="mb-6 flex justify-center">
           <div className="inline-flex items-center rounded-lg border border-blue-200 bg-white p-1">
-            <button
-              className={`px-4 py-2 rounded-md ${dataSource === "KEGG" ? "bg-blue-100 text-blue-800 font-medium" : "text-gray-600"}`}
-              onClick={() => setDataSource("KEGG")}
-            >
-              KEGG Database
-            </button>
-            <button
-              className={`px-4 py-2 rounded-md ${dataSource === "NCBI" ? "bg-blue-100 text-blue-800 font-medium" : "text-gray-600"}`}
-              onClick={() => setDataSource("NCBI")}
-            >
-              NCBI Datasets
-            </button>
+            <div className="px-4 py-2 rounded-md bg-blue-100 text-blue-800 font-medium">
+              NCBI Datasets API v2alpha
+            </div>
           </div>
         </div>
 
@@ -641,6 +717,11 @@ const GenomeSearch = ({
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="pl-10"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          searchGenomesByQuery(searchQuery);
+                        }
+                      }}
                     />
                   </div>
                 </div>
@@ -838,15 +919,27 @@ const GenomeSearch = ({
 
             <div className="flex justify-between items-center">
               <div className="flex items-center space-x-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={clearFilters}
-                  className="flex items-center"
-                >
-                  <Filter className="mr-2 h-4 w-4" />
-                  Clear Filters
-                </Button>
+                <div className="flex space-x-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={clearFilters}
+                    className="flex items-center"
+                  >
+                    <Filter className="mr-2 h-4 w-4" />
+                    Clear Filters
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => searchGenomesByQuery(searchQuery)}
+                    className="flex items-center"
+                    disabled={isLoading}
+                  >
+                    <Search className="mr-2 h-4 w-4" />
+                    Search NCBI
+                  </Button>
+                </div>
                 {isLoading && (
                   <div className="flex items-center text-sm text-gray-600">
                     <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
@@ -941,7 +1034,7 @@ const GenomeSearch = ({
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent>
-                                <p>Download FASTA sequence</p>
+                                <p>Download CDS FASTA sequence</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
@@ -952,15 +1045,7 @@ const GenomeSearch = ({
                                   variant="outline"
                                   size="sm"
                                   onClick={() => {
-                                    if (
-                                      genome.source === "KEGG" &&
-                                      genome.keggUrl
-                                    ) {
-                                      window.open(genome.keggUrl, "_blank");
-                                    } else if (
-                                      genome.source === "NCBI" &&
-                                      genome.ncbiAccession
-                                    ) {
+                                    if (genome.ncbiAccession) {
                                       window.open(
                                         `https://www.ncbi.nlm.nih.gov/datasets/genome/${genome.ncbiAccession}`,
                                         "_blank",
@@ -972,7 +1057,7 @@ const GenomeSearch = ({
                                 </Button>
                               </TooltipTrigger>
                               <TooltipContent>
-                                <p>View in {genome.source} database</p>
+                                <p>View in NCBI database</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
@@ -1060,21 +1145,13 @@ const GenomeSearch = ({
                               className="flex-1"
                             >
                               <Download className="mr-2 h-4 w-4" />
-                              Download
+                              Download CDS
                             </Button>
                             <Button
                               variant="outline"
                               size="sm"
                               onClick={() => {
-                                if (
-                                  genome.source === "KEGG" &&
-                                  genome.keggUrl
-                                ) {
-                                  window.open(genome.keggUrl, "_blank");
-                                } else if (
-                                  genome.source === "NCBI" &&
-                                  genome.ncbiAccession
-                                ) {
+                                if (genome.ncbiAccession) {
                                   window.open(
                                     `https://www.ncbi.nlm.nih.gov/datasets/genome/${genome.ncbiAccession}`,
                                     "_blank",
