@@ -9,7 +9,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import GenomeUploader from "./GenomeUploader";
 import ResultsDashboard from "./ResultsDashboard";
-import GenomeSearch from "./KEGGGenomeSearch";
+import NCBIGenomeSearch from "./NCBIGenomeSearch";
 import { motion } from "framer-motion";
 import {
   ResistancePredictor,
@@ -150,7 +150,7 @@ const HomePage = () => {
               </TabsContent>
 
               <TabsContent value="kegg" className="mt-0">
-                <GenomeSearch
+                <NCBIGenomeSearch
                   onGenomeSelect={(genome) => {
                     console.log("Selected KEGG genome:", genome);
                     // You can add logic here to process the selected KEGG genome

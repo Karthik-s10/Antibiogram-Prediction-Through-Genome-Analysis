@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 
-// NCBI API Key
+// NCBI API Key - Using the official NCBI Datasets API
 const NCBI_API_KEY = "feec4ac9f28178c8b078da5292d7caa86408";
 
-// NCBI Datasets API base URL
+// NCBI Datasets API base URL - Official v2alpha endpoint
 const NCBI_DATASETS_BASE_URL = "https://api.ncbi.nlm.nih.gov/datasets/v2alpha";
 import axios from "axios";
 import {
@@ -78,19 +78,19 @@ interface GenomeData {
   sequenceAvailable: boolean;
 }
 
-interface GenomeSearchProps {
+interface NCBIGenomeSearchProps {
   onGenomeSelect?: (genome: GenomeData) => void;
   onSequenceDownload?: (genome: GenomeData) => void;
   onBatchProcess?: (genomes: GenomeData[]) => void;
   className?: string;
 }
 
-const GenomeSearch = ({
+const NCBIGenomeSearch = ({
   onGenomeSelect = () => {},
   onSequenceDownload = () => {},
   onBatchProcess = () => {},
   className = "",
-}: GenomeSearchProps) => {
+}: NCBIGenomeSearchProps) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSpecies, setSelectedSpecies] = useState("all");
   const [selectedVariant, setSelectedVariant] = useState("all");
@@ -121,7 +121,7 @@ const GenomeSearch = ({
     setError("");
 
     try {
-      // Using NCBI Datasets API with POST request as required by the API
+      // Using NCBI Datasets API with POST request as required by the official API documentation
       const response = await axios({
         method: "post",
         url: `${NCBI_DATASETS_BASE_URL}/genome/dataset_report`,
@@ -140,6 +140,7 @@ const GenomeSearch = ({
           Accept: "application/json",
           "api-key": NCBI_API_KEY,
         },
+        timeout: 30000, // 30 second timeout
       });
 
       console.log("NCBI API Response:", response.data);
@@ -370,7 +371,7 @@ const GenomeSearch = ({
   const handleSequenceDownload = async (genome: GenomeData) => {
     setIsLoading(true);
     try {
-      // Download CDS FASTA using GET request as specified by NCBI Datasets API for downloads
+      // Download CDS FASTA using GET request as specified by NCBI Datasets API documentation
       const response = await axios({
         method: "get",
         url: `${NCBI_DATASETS_BASE_URL}/genome/accession/${genome.ncbiAccession || genome.id}/download`,
@@ -383,6 +384,7 @@ const GenomeSearch = ({
           Accept: "application/octet-stream",
           "api-key": NCBI_API_KEY,
         },
+        timeout: 60000, // 60 second timeout for downloads
       });
 
       // Check if we got a valid response
@@ -417,6 +419,7 @@ const GenomeSearch = ({
             Accept: "application/octet-stream",
             "api-key": NCBI_API_KEY,
           },
+          timeout: 60000, // 60 second timeout for downloads
         });
 
         const blob = new Blob([fallbackResponse.data], { type: "text/plain" });
@@ -462,7 +465,7 @@ const GenomeSearch = ({
       const genomesWithSequences = await Promise.all(
         genomesToProcess.map(async (genome) => {
           try {
-            // Using NCBI Datasets API to get CDS FASTA sequence
+            // Using NCBI Datasets API to get CDS FASTA sequence for batch processing
             const response = await axios({
               method: "get",
               url: `${NCBI_DATASETS_BASE_URL}/genome/accession/${genome.ncbiAccession || genome.id}/download`,
@@ -475,6 +478,7 @@ const GenomeSearch = ({
                 Accept: "text/plain",
                 "api-key": NCBI_API_KEY,
               },
+              timeout: 60000, // 60 second timeout for batch downloads
             });
 
             // Store the CDS FASTA content directly
@@ -513,7 +517,7 @@ const GenomeSearch = ({
     setError("");
 
     try {
-      // Using NCBI Datasets API for search with POST request
+      // Using NCBI Datasets API for search with POST request - official v2alpha endpoint
       const response = await axios({
         method: "post",
         url: `${NCBI_DATASETS_BASE_URL}/genome/dataset_report`,
@@ -533,6 +537,7 @@ const GenomeSearch = ({
           Accept: "application/json",
           "api-key": NCBI_API_KEY,
         },
+        timeout: 30000, // 30 second timeout
       });
 
       console.log("Search API Response:", response.data);
@@ -1171,4 +1176,4 @@ const GenomeSearch = ({
   );
 };
 
-export default GenomeSearch;
+export default NCBIGenomeSearch;
