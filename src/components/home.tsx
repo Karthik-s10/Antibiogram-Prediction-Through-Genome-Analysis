@@ -11,10 +11,15 @@ import GenomeUploader from "./GenomeUploader";
 import ResultsDashboard from "./ResultsDashboard";
 import NCBIGenomeSearch from "./NCBIGenomeSearch";
 import { motion } from "framer-motion";
+import axios from "axios";
 import {
   ResistancePredictor,
   PredictionResult,
 } from "@/lib/resistancePredictor";
+
+// Import NCBI API constants from NCBIGenomeSearch
+const NCBI_API_KEY = "feec4ac9f28178c8b078da5292d7caa86408";
+const NCBI_DATASETS_BASE_URL = "https://api.ncbi.nlm.nih.gov/datasets/v2alpha";
 
 interface GenomeData {
   id: string;
@@ -64,8 +69,60 @@ const HomePage = () => {
       // Simulate processing delay for realistic UX
       setTimeout(async () => {
         try {
-          // Initialize the ML predictor with the genome sequence
-          const predictor = new ResistancePredictor(fastaContent);
+          // Check if the content might be a ZIP file (starts with PK magic number)
+          let processedFastaContent = fastaContent;
+          if (
+            fastaContent.startsWith("PK") ||
+            fastaContent.includes("\x50\x4B\x03\x04")
+          ) {
+            console.log(
+              "ZIP file detected in FASTA content, attempting to extract...",
+            );
+            try {
+              // Convert string to ArrayBuffer for JSZip
+              const textEncoder = new TextEncoder();
+              const zipData = textEncoder.encode(fastaContent).buffer;
+
+              // Use JSZip to extract FASTA content
+              const JSZip = await import("jszip").then(
+                (module) => module.default,
+              );
+              const zip = new JSZip.default();
+              await zip.loadAsync(zipData);
+
+              // Look for FASTA files in the ZIP
+              let extractedContent = null;
+              for (const filename of Object.keys(zip.files)) {
+                if (
+                  filename.endsWith(".fasta") ||
+                  filename.endsWith(".fa") ||
+                  filename.includes("cds_from") ||
+                  filename.includes("genomic.fna")
+                ) {
+                  const file = zip.files[filename];
+                  if (!file.dir) {
+                    extractedContent = await file.async("string");
+                    console.log(
+                      `Extracted FASTA content from ${filename} in ZIP archive`,
+                    );
+                    break;
+                  }
+                }
+              }
+
+              if (extractedContent) {
+                processedFastaContent = extractedContent;
+              } else {
+                console.error("No FASTA files found in ZIP archive");
+              }
+            } catch (zipError) {
+              console.error("Error extracting FASTA from ZIP:", zipError);
+              // Continue with original content if extraction fails
+            }
+          }
+
+          // Initialize the ML predictor with the processed genome sequence
+          const predictor = new ResistancePredictor(processedFastaContent);
 
           // Run the machine learning analysis
           const predictions = await predictor.predictResistance();
@@ -134,7 +191,7 @@ const HomePage = () => {
                 <TabsTrigger value="upload" disabled={isProcessing}>
                   Genome Upload
                 </TabsTrigger>
-                <TabsTrigger value="kegg" disabled={isProcessing}>
+                <TabsTrigger value="ncbi" disabled={isProcessing}>
                   Genome Database
                 </TabsTrigger>
                 <TabsTrigger value="results" disabled={!processedResult}>
@@ -149,10 +206,10 @@ const HomePage = () => {
                 />
               </TabsContent>
 
-              <TabsContent value="kegg" className="mt-0">
+              <TabsContent value="ncbi" className="mt-0">
                 <NCBIGenomeSearch
                   onGenomeSelect={(genome) => {
-                    console.log("Selected KEGG genome:", genome);
+                    console.log("Selected NCBI genome:", genome);
                     // You can add logic here to process the selected KEGG genome
                   }}
                   onSequenceDownload={(genome) => {
@@ -166,7 +223,7 @@ const HomePage = () => {
                     setIsProcessing(true);
 
                     // Simulate batch processing
-                    setTimeout(() => {
+                    setTimeout(async () => {
                       // In a real implementation, this would call the Python ML model
                       // through an API endpoint to process all genomes
 
@@ -184,11 +241,80 @@ const HomePage = () => {
 
                         setUploadedGenome(genomeData);
 
-                        // Initialize the ML predictor with mock data
-                        const mockFastaContent = `>${genome.id}\nACGTACGT`; // Mock sequence
-                        const predictor = new ResistancePredictor(
-                          mockFastaContent,
-                        );
+                        // Try to get a better quality sequence for the selected genome
+                        const batchDownloadRequestData = {
+                          accessions: [genome.id],
+                          include_annotation_type: [
+                            "CDS_FASTA",
+                            "GENOME_FASTA",
+                          ],
+                          format: "fasta",
+                        };
+
+                        let fastaContent = `>${genome.id}\nACGTACGT`; // Default mock sequence
+
+                        try {
+                          // Attempt to get actual sequence data
+                          const response = await axios({
+                            method: "post",
+                            url: `${NCBI_DATASETS_BASE_URL}/genome/download`,
+                            data: batchDownloadRequestData,
+                            responseType: "blob",
+                            headers: {
+                              "Content-Type": "application/json",
+                              Accept: "text/plain, application/zip",
+                              "api-key": NCBI_API_KEY,
+                            },
+                            timeout: 30000,
+                          });
+
+                          // Check if response is ZIP
+                          const isZip =
+                            response.headers["content-type"]?.includes(
+                              "application/zip",
+                            );
+
+                          if (isZip) {
+                            // Extract FASTA from ZIP
+                            const JSZip = await import("jszip").then(
+                              (module) => module.default,
+                            );
+                            const zip = new JSZip.default();
+                            const contents = await zip.loadAsync(response.data);
+
+                            // Find FASTA files
+                            for (const filename of Object.keys(
+                              contents.files,
+                            )) {
+                              if (
+                                filename.endsWith(".fasta") ||
+                                filename.endsWith(".fa") ||
+                                filename.includes("cds_from") ||
+                                filename.includes("genomic.fna")
+                              ) {
+                                const file = contents.files[filename];
+                                if (!file.dir) {
+                                  fastaContent = await file.async("string");
+                                  console.log(
+                                    `Using extracted FASTA from ${filename}`,
+                                  );
+                                  break;
+                                }
+                              }
+                            }
+                          } else {
+                            // Direct FASTA content
+                            fastaContent = await response.data.text();
+                          }
+                        } catch (error) {
+                          console.error(
+                            "Error fetching actual sequence, using mock data:",
+                            error,
+                          );
+                        }
+
+                        // Initialize the ML predictor with the best available sequence
+                        const predictor = new ResistancePredictor(fastaContent);
 
                         // Run the analysis
                         predictor.predictResistance().then((predictions) => {

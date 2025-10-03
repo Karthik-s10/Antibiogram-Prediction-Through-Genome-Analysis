@@ -141,16 +141,53 @@ export class SequenceAnalyzer {
     return mutations;
   }
 
-  // Get sequence statistics
+  // Get sequence statistics with improved quality assessment
   public getSequenceStats() {
     const length = this.sequence.length;
-    const gcContent = (this.sequence.match(/[GC]/g) || []).length / length;
+    const gcCount = (this.sequence.match(/[GC]/g) || []).length;
+    const gcContent = length > 0 ? (gcCount / length) * 100 : 0;
+    const nCount = (this.sequence.match(/N/g) || []).length;
+    const nPercentage = length > 0 ? (nCount / length) * 100 : 0;
+
+    // Improved quality assessment based on multiple factors
+    let qualityScore = 0;
+
+    // Length score (0-40 points)
+    if (length > 1000000) qualityScore += 40;
+    else if (length > 500000) qualityScore += 30;
+    else if (length > 100000) qualityScore += 20;
+    else if (length > 10000) qualityScore += 10;
+
+    // N content score (0-30 points) - fewer Ns is better
+    if (nPercentage < 1) qualityScore += 30;
+    else if (nPercentage < 5) qualityScore += 20;
+    else if (nPercentage < 10) qualityScore += 10;
+
+    // GC content score (0-20 points) - most bacteria have GC content between 25% and 75%
+    if (gcContent >= 25 && gcContent <= 75) qualityScore += 20;
+    else if (gcContent >= 15 && gcContent <= 85) qualityScore += 10;
+
+    // Coverage estimation (0-10 points) - this is a simplified estimation
+    // In a real implementation, this would come from sequencing metadata
+    const coverageEstimate = Math.min(10, Math.floor(length / 100000));
+    qualityScore += coverageEstimate;
+
+    // Determine quality label based on score
+    let quality = "Low";
+    if (qualityScore >= 70) quality = "High";
+    else if (qualityScore >= 40) quality = "Medium";
+
+    console.log(
+      `Sequence quality assessment: Length=${length}, N%=${nPercentage.toFixed(2)}, GC%=${gcContent.toFixed(2)}, Score=${qualityScore}, Quality=${quality}`,
+    );
 
     return {
       length,
-      gcContent: gcContent * 100,
-      nCount: (this.sequence.match(/N/g) || []).length,
-      quality: length > 1000000 ? "High" : length > 100000 ? "Medium" : "Low",
+      gcContent,
+      nCount,
+      nPercentage,
+      qualityScore,
+      quality,
     };
   }
 }

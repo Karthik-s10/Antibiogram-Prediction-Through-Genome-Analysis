@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Download, FileUp, Info, Activity, Database } from "lucide-react";
+import { Download, FileUp, Info, Activity, Database, Dna } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -18,6 +18,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import ExplainabilityView from "./ExplainabilityView";
+import DNAHelixVisualization from "./DNAHelixVisualization";
 import { PredictionResult } from "@/lib/resistancePredictor";
 
 interface ResultsDashboardProps {
@@ -138,8 +139,12 @@ const ResultsDashboard = ({
             onValueChange={setActiveTab}
             className="w-full"
           >
-            <TabsList className="grid w-full grid-cols-2 mb-8">
+            <TabsList className="grid w-full grid-cols-3 mb-8">
               <TabsTrigger value="profile">Resistance Profile</TabsTrigger>
+              <TabsTrigger value="dna-helix">
+                <Dna className="mr-2 h-4 w-4" />
+                DNA Helix
+              </TabsTrigger>
               <TabsTrigger value="explainability">Genetic Markers</TabsTrigger>
             </TabsList>
 
@@ -245,6 +250,20 @@ const ResultsDashboard = ({
                   </div>
                 </div>
               </div>
+            </TabsContent>
+
+            <TabsContent value="dna-helix">
+              <DNAHelixVisualization
+                predictions={predictions}
+                genomeId={sampleName}
+              />
+            </TabsContent>
+
+            <TabsContent value="dna-helix">
+              <DNAHelixVisualization
+                predictions={predictions}
+                genomeId={sampleName}
+              />
             </TabsContent>
 
             <TabsContent value="explainability">

@@ -5,6 +5,9 @@ const NCBI_API_KEY = "feec4ac9f28178c8b078da5292d7caa86408";
 
 // NCBI Datasets API base URL - Official v2alpha endpoint
 const NCBI_DATASETS_BASE_URL = "https://api.ncbi.nlm.nih.gov/datasets/v2alpha";
+// Enable detailed logging for debugging
+const DEBUG_MODE = true;
+
 import axios from "axios";
 import {
   Card,
@@ -121,20 +124,30 @@ const NCBIGenomeSearch = ({
     setError("");
 
     try {
-      // Using NCBI Datasets API with POST request as required by the official API documentation
+      // Using NCBI Datasets API with POST request and JSON body
+      const requestData = {
+        filters: {
+          source_database: ["RefSeq"],
+          assembly_level: ["Complete Genome"],
+          exclude_paired_reports: true,
+          exclude_atypical: true,
+        },
+        returned_content: "COMPLETE",
+        page_size: 20,
+      };
+
+      if (DEBUG_MODE) {
+        console.log(
+          "NCBI API Request URL:",
+          `${NCBI_DATASETS_BASE_URL}/genome/dataset_report`,
+        );
+        console.log("NCBI API Request Data:", requestData);
+      }
+
       const response = await axios({
         method: "post",
         url: `${NCBI_DATASETS_BASE_URL}/genome/dataset_report`,
-        data: {
-          filters: {
-            assembly_source: "refseq",
-            assembly_level: ["complete_genome"],
-            exclude_paired_reports: true,
-            exclude_atypical: true,
-          },
-          returned_content: "COMPLETE",
-          page_size: 20,
-        },
+        data: requestData,
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
@@ -143,7 +156,10 @@ const NCBIGenomeSearch = ({
         timeout: 30000, // 30 second timeout
       });
 
-      console.log("NCBI API Response:", response.data);
+      if (DEBUG_MODE) {
+        console.log("NCBI API Response:", response.data);
+        console.log("Response structure keys:", Object.keys(response.data));
+      }
 
       if (!response.data) {
         throw new Error("No data received from NCBI Datasets API");
@@ -152,119 +168,271 @@ const NCBIGenomeSearch = ({
       // Handle different response structures
       let reports = [];
       if (response.data.reports) {
+        console.log(
+          "Found reports array with length:",
+          response.data.reports.length,
+        );
         reports = response.data.reports;
       } else if (Array.isArray(response.data)) {
+        console.log(
+          "Response data is an array with length:",
+          response.data.length,
+        );
         reports = response.data;
       } else if (response.data.assemblies) {
+        console.log(
+          "Found assemblies with length:",
+          response.data.assemblies.length,
+        );
         reports = response.data.assemblies;
+      } else if (response.data.assemblies_by_taxid) {
+        // Handle v2alpha API response structure
+        console.log("Found assemblies_by_taxid structure");
+        const assembliesData = Object.values(
+          response.data.assemblies_by_taxid || {},
+        );
+        reports = assembliesData.flatMap(
+          (taxData: any) => taxData.assemblies || [],
+        );
+        console.log(
+          "Extracted reports from assemblies_by_taxid:",
+          reports.length,
+        );
+      } else if (response.data.assemblies_by_accession) {
+        // Alternative v2alpha API response structure
+        console.log("Found assemblies_by_accession structure");
+        reports = Object.values(response.data.assemblies_by_accession || {});
+        console.log(
+          "Extracted reports from assemblies_by_accession:",
+          reports.length,
+        );
       } else {
         console.warn("Unexpected response structure:", response.data);
-        // Fallback to mock data for development
-        reports = [
-          {
-            accession: "GCF_000005825.2",
-            assembly_info: {
-              assembly_accession: "GCF_000005825.2",
-              assembly_name: "ASM582v2",
-              assembly_stats: {
-                total_sequence_length: 4641652,
-                gc_percent: 66.6,
-              },
-            },
-            organism: {
-              organism_name: "Escherichia coli str. K-12 substr. MG1655",
-              tax_id: 511145,
-              infraspecific_names: {
-                strain: "K-12",
-              },
-            },
-            annotation_info: {
-              stats: {
-                gene_counts: {
-                  total: 4140,
-                  protein_coding: 4140,
+        console.log("Response data keys:", Object.keys(response.data));
+
+        // Check if we have direct report objects in the console logs
+        if (DEBUG_MODE) {
+          console.log("Attempting to extract direct report objects");
+        }
+
+        // Try to extract reports directly from the response data
+        reports = [];
+        try {
+          // If we have direct objects in the response, use them
+          if (response.data && typeof response.data === "object") {
+            // Check if this is a single report object
+            if (response.data.accession || response.data.organism) {
+              console.log("Found single report object");
+              reports = [response.data];
+            }
+            // Check if this might be a collection of reports
+            else if (
+              Object.values(response.data).some(
+                (val) =>
+                  val &&
+                  typeof val === "object" &&
+                  (val.accession || val.organism),
+              )
+            ) {
+              console.log("Found collection of report objects");
+              reports = Object.values(response.data).filter(
+                (val) =>
+                  val &&
+                  typeof val === "object" &&
+                  (val.accession || val.organism),
+              );
+            }
+          }
+
+          if (reports.length === 0) {
+            console.log("No reports found in response data, using mock data");
+            // Fallback to mock data for development
+            reports = [
+              {
+                accession: "GCF_000005825.2",
+                assembly_info: {
+                  assembly_accession: "GCF_000005825.2",
+                  assembly_name: "ASM582v2",
+                  assembly_stats: {
+                    total_sequence_length: 4641652,
+                    gc_percent: 66.6,
+                  },
+                },
+                organism: {
+                  organism_name: "Escherichia coli str. K-12 substr. MG1655",
+                  tax_id: 511145,
+                  infraspecific_names: {
+                    strain: "K-12",
+                  },
+                },
+                annotation_info: {
+                  stats: {
+                    gene_counts: {
+                      total: 4140,
+                      protein_coding: 4140,
+                    },
+                  },
                 },
               },
-            },
-          },
-          {
-            accession: "GCF_000393015.1",
-            assembly_info: {
-              assembly_accession: "GCF_000393015.1",
-              assembly_name: "ASM39301v1",
-              assembly_stats: {
-                total_sequence_length: 6264404,
-                gc_percent: 67.1,
-              },
-            },
-            organism: {
-              organism_name: "Pseudomonas aeruginosa PAO1",
-              tax_id: 208964,
-              infraspecific_names: {
-                strain: "PAO1",
-              },
-            },
-            annotation_info: {
-              stats: {
-                gene_counts: {
-                  total: 5570,
-                  protein_coding: 5570,
+              {
+                accession: "GCF_000393015.1",
+                assembly_info: {
+                  assembly_accession: "GCF_000393015.1",
+                  assembly_name: "ASM39301v1",
+                  assembly_stats: {
+                    total_sequence_length: 6264404,
+                    gc_percent: 67.1,
+                  },
+                },
+                organism: {
+                  organism_name: "Pseudomonas aeruginosa PAO1",
+                  tax_id: 208964,
+                  infraspecific_names: {
+                    strain: "PAO1",
+                  },
+                },
+                annotation_info: {
+                  stats: {
+                    gene_counts: {
+                      total: 5570,
+                      protein_coding: 5570,
+                    },
+                  },
                 },
               },
-            },
-          },
-        ];
+            ];
+          }
+        } catch (err) {
+          console.error("Error extracting direct reports:", err);
+        }
       }
 
       // Process genome reports from Datasets API
-      const genomeDetails = reports.map((report: any) => {
-        const assembly = report.assembly_info || {};
-        const organism = report.organism || {};
-        const annotation = report.annotation_info || {};
-        const assemblyStats = assembly.assembly_stats || {};
+      const genomeDetails = reports
+        .map((report: any) => {
+          if (DEBUG_MODE) {
+            console.log("Processing initial report:", report);
+          }
 
-        return {
-          id: assembly.assembly_accession || report.accession,
-          organism: organism.organism_name || "Unknown organism",
-          species:
-            organism.organism_name?.split(" ").slice(0, 2).join(" ") ||
-            "Unknown species",
-          strain: organism.infraspecific_names?.strain || undefined,
-          taxonomy: organism.tax_id ? `Tax ID: ${organism.tax_id}` : "Bacteria",
-          size: assemblyStats.total_sequence_length || 0,
-          genes: annotation.stats?.gene_counts?.total || 0,
-          proteins: annotation.stats?.gene_counts?.protein_coding || 0,
-          description:
-            assembly.assembly_name ||
-            organism.organism_name ||
-            "Bacterial genome",
-          source: "NCBI",
-          ncbiId: report.accession,
-          ncbiAccession: assembly.assembly_accession || report.accession,
-          gcContent: assemblyStats.gc_percent || 50,
-          sequenceAvailable: true,
-        };
-      });
+          try {
+            // Handle the new v2alpha API response structure
+            const assembly = report.assembly_info || {};
+            const organism = report.organism || {};
+            const annotation = report.annotation_info || {};
+            const assemblyStats =
+              report.assembly_stats || assembly.assembly_stats || {};
 
-      const validGenomes = genomeDetails.filter(Boolean) as GenomeData[];
+            // Extract organism name from various possible locations
+            const organismName = organism.organism_name || "Unknown organism";
+
+            // Extract accession - use the main accession field
+            const accession = report.accession || report.current_accession;
+
+            // If we don't have an accession, try to extract it from the console log format
+            // This handles the case shown in the screenshot where accession is in a specific format
+            let extractedAccession = accession;
+            if (!extractedAccession && typeof report === "object") {
+              // Try to find accession in the format shown in the console logs
+              const keys = Object.keys(report);
+              for (const key of keys) {
+                if (key === "accession" && typeof report[key] === "string") {
+                  extractedAccession = report[key];
+                  break;
+                }
+              }
+            }
+
+            // Convert size from string to number if needed
+            const sizeValue = assemblyStats.total_sequence_length;
+            const genomeSizeNumber =
+              typeof sizeValue === "string"
+                ? parseInt(sizeValue, 10)
+                : sizeValue || 0;
+
+            const processedGenome = {
+              id:
+                extractedAccession ||
+                "unknown-id-" + Math.random().toString(36).substring(2, 9),
+              organism: organismName,
+              species:
+                organismName.split(" ").slice(0, 2).join(" ") ||
+                "Unknown species",
+              strain: organism.infraspecific_names?.strain || undefined,
+              taxonomy: organism.tax_id
+                ? `Tax ID: ${organism.tax_id}`
+                : "Bacteria",
+              size: genomeSizeNumber,
+              genes: annotation.stats?.gene_counts?.total || 0,
+              proteins: annotation.stats?.gene_counts?.protein_coding || 0,
+              description:
+                assembly.assembly_name || organismName || "Bacterial genome",
+              source: "NCBI" as const,
+              ncbiId: extractedAccession,
+              ncbiAccession: extractedAccession,
+              gcContent: assemblyStats.gc_percent || 50,
+              sequenceAvailable: true,
+            };
+
+            if (DEBUG_MODE) {
+              console.log("Processed initial genome:", processedGenome);
+            }
+
+            return processedGenome;
+          } catch (err) {
+            console.error("Error processing genome report:", err, report);
+            return null;
+          }
+        })
+        .filter(Boolean);
+
+      // This filter is now redundant since we're already filtering in the map function
+      // but keeping it for extra safety
+      const validGenomes = genomeDetails.filter((genome) => {
+        return genome && genome.id && genome.organism;
+      }) as GenomeData[];
+
+      if (DEBUG_MODE) {
+        console.log("Final valid genomes count:", validGenomes.length);
+        console.log("Final valid genomes:", validGenomes);
+      }
+
+      if (DEBUG_MODE) {
+        console.log("Valid initial genomes processed:", validGenomes.length);
+        console.log("First few initial genomes:", validGenomes.slice(0, 3));
+      }
 
       if (validGenomes.length === 0) {
         throw new Error("No valid genomes found");
       }
 
+      // Force a state update with the new genomes
+      console.log("Setting genomes state with", validGenomes.length, "genomes");
+
+      // Set genomes state first
       setGenomes(validGenomes);
+
+      // Set filtered genomes to show all results initially
       setFilteredGenomes(validGenomes);
 
       // Set filter ranges based on actual data
-      const sizes = validGenomes.map((g: GenomeData) => g.size / 1000000); // Convert to Mbp
-      const genes = validGenomes.map((g: GenomeData) => g.genes);
-      const gcContents = validGenomes
-        .map((g: GenomeData) => g.gcContent)
-        .filter(Boolean);
+      if (validGenomes.length > 0) {
+        const sizes = validGenomes.map((g: GenomeData) => g.size / 1000000); // Convert to Mbp
+        const genes = validGenomes.map((g: GenomeData) => g.genes);
+        const gcContents = validGenomes
+          .map((g: GenomeData) => g.gcContent)
+          .filter(Boolean);
 
-      setSizeRange([Math.min(...sizes), Math.max(...sizes)]);
-      setGeneCountRange([Math.min(...genes), Math.max(...genes)]);
-      setGcContentRange([Math.min(...gcContents), Math.max(...gcContents)]);
+        // Only set ranges if we have valid values
+        if (sizes.length > 0) {
+          setSizeRange([Math.min(...sizes), Math.max(...sizes)]);
+        }
+        if (genes.length > 0) {
+          setGeneCountRange([Math.min(...genes), Math.max(...genes)]);
+        }
+        if (gcContents.length > 0) {
+          setGcContentRange([Math.min(...gcContents), Math.max(...gcContents)]);
+        }
+      }
     } catch (err: any) {
       console.error("Error fetching NCBI genomes:", err);
 
@@ -292,59 +460,168 @@ const NCBIGenomeSearch = ({
 
   // Fetch genomes on component mount
   useEffect(() => {
+    console.log("Component mounted, fetching genomes...");
     fetchGenomes();
+
+    // Initialize filter values
+    setSearchQuery("");
+    setSelectedSpecies("all");
+    setSelectedVariant("all");
+    setSelectedTaxonomy("all");
+    setShowAdvancedFilters(false);
+
+    // Reset selected genomes
+    setSelectedGenomes(new Set());
   }, []);
 
+  // Debug effect to monitor state changes
   useEffect(() => {
+    console.log(
+      "State updated - genomes:",
+      genomes.length,
+      "filtered:",
+      filteredGenomes.length,
+    );
+    console.log("Genomes array:", genomes);
+    console.log("FilteredGenomes array:", filteredGenomes);
+  }, [genomes, filteredGenomes]);
+
+  useEffect(() => {
+    console.log("Filter effect triggered with genomes:", genomes.length);
+    console.log("Current genomes array in filter effect:", genomes);
+
+    // Safety check - if genomes is empty, set empty filtered array
+    if (!genomes || genomes.length === 0) {
+      console.log("No genomes to filter, setting empty filtered array");
+      setFilteredGenomes([]);
+      return;
+    }
+
+    // For search by strain name, we want to show all results from the API
+    // This is a special case when we've just performed a search
+    if (
+      searchQuery &&
+      searchQuery.trim() !== "" &&
+      genomes.length > 0 &&
+      selectedSpecies === "all" &&
+      selectedVariant === "all" &&
+      selectedTaxonomy === "all" &&
+      !showAdvancedFilters
+    ) {
+      console.log(
+        "Search query present with no other filters, showing all search results",
+      );
+      setFilteredGenomes([...genomes]);
+      return;
+    }
+
+    // Initialize with all genomes if no filters are applied
+    if (
+      searchQuery === "" &&
+      selectedSpecies === "all" &&
+      selectedVariant === "all" &&
+      selectedTaxonomy === "all" &&
+      !showAdvancedFilters
+    ) {
+      console.log("No filters applied, showing all genomes");
+      setFilteredGenomes([...genomes]);
+      return;
+    }
+
     // Filter genomes based on search criteria and advanced filters
     let filtered = genomes.filter((genome) => {
-      const matchesQuery =
-        searchQuery === "" ||
-        genome.organism.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        genome.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        genome.species.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (genome.strain &&
-          genome.strain.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (genome.variant &&
-          genome.variant.toLowerCase().includes(searchQuery.toLowerCase()));
+      // Safety check for null/undefined genome objects
+      if (!genome) {
+        console.warn("Found null/undefined genome in filter");
+        return false;
+      }
 
-      const matchesSpecies =
-        selectedSpecies === "all" ||
-        genome.species.toLowerCase().includes(selectedSpecies.toLowerCase());
+      try {
+        // Convert search query to lowercase once for efficiency
+        const lowerSearchQuery = searchQuery.toLowerCase();
 
-      const matchesVariant =
-        selectedVariant === "all" ||
-        (genome.variant &&
-          genome.variant.toLowerCase().includes(selectedVariant.toLowerCase()));
+        // Check if the search query matches any of the genome fields
+        const matchesQuery =
+          searchQuery === "" ||
+          (genome.organism &&
+            genome.organism.toLowerCase().includes(lowerSearchQuery)) ||
+          (genome.id && genome.id.toLowerCase().includes(lowerSearchQuery)) ||
+          (genome.species &&
+            genome.species.toLowerCase().includes(lowerSearchQuery)) ||
+          (genome.strain &&
+            genome.strain.toLowerCase().includes(lowerSearchQuery)) ||
+          (genome.variant &&
+            genome.variant.toLowerCase().includes(lowerSearchQuery)) ||
+          (genome.ncbiAccession &&
+            genome.ncbiAccession.toLowerCase().includes(lowerSearchQuery)) ||
+          (genome.ncbiId &&
+            genome.ncbiId.toLowerCase().includes(lowerSearchQuery));
 
-      const matchesTaxonomy =
-        selectedTaxonomy === "all" ||
-        genome.taxonomy.toLowerCase().includes(selectedTaxonomy.toLowerCase());
+        // Check if the species matches
+        const matchesSpecies =
+          selectedSpecies === "all" ||
+          (genome.species &&
+            genome.species
+              .toLowerCase()
+              .includes(selectedSpecies.toLowerCase()));
 
-      // Advanced filters
-      const genomeSizeMbp = genome.size / 1000000;
-      const matchesSize =
-        genomeSizeMbp >= sizeRange[0] && genomeSizeMbp <= sizeRange[1];
+        // Check if the variant or strain matches
+        const matchesVariant =
+          selectedVariant === "all" ||
+          (genome.variant &&
+            genome.variant
+              .toLowerCase()
+              .includes(selectedVariant.toLowerCase())) ||
+          (genome.strain &&
+            genome.strain
+              .toLowerCase()
+              .includes(selectedVariant.toLowerCase()));
 
-      const matchesGeneCount =
-        genome.genes >= geneCountRange[0] && genome.genes <= geneCountRange[1];
+        // Check if the taxonomy matches
+        const matchesTaxonomy =
+          selectedTaxonomy === "all" ||
+          (genome.taxonomy &&
+            genome.taxonomy
+              .toLowerCase()
+              .includes(selectedTaxonomy.toLowerCase()));
 
-      const matchesGcContent =
-        !genome.gcContent || // Don't filter if GC content is unknown
-        (genome.gcContent >= gcContentRange[0] &&
-          genome.gcContent <= gcContentRange[1]);
+        // Advanced filters - only apply if advanced filters are shown
+        let matchesAdvancedFilters = true;
+        if (showAdvancedFilters) {
+          const genomeSizeMbp = genome.size / 1000000;
+          const matchesSize =
+            genomeSizeMbp >= sizeRange[0] && genomeSizeMbp <= sizeRange[1];
 
-      return (
-        matchesQuery &&
-        matchesSpecies &&
-        matchesVariant &&
-        matchesTaxonomy &&
-        matchesSize &&
-        matchesGeneCount &&
-        matchesGcContent
-      );
+          const matchesGeneCount =
+            genome.genes >= geneCountRange[0] &&
+            genome.genes <= geneCountRange[1];
+
+          const matchesGcContent =
+            !genome.gcContent || // Don't filter if GC content is unknown
+            (genome.gcContent >= gcContentRange[0] &&
+              genome.gcContent <= gcContentRange[1]);
+
+          matchesAdvancedFilters =
+            matchesSize && matchesGeneCount && matchesGcContent;
+        }
+
+        return (
+          matchesQuery &&
+          matchesSpecies &&
+          matchesVariant &&
+          matchesTaxonomy &&
+          matchesAdvancedFilters
+        );
+      } catch (err) {
+        console.error("Error filtering genome:", err, genome);
+        return false;
+      }
     });
 
+    console.log("Filtered genomes:", filtered.length, "out of", genomes.length);
+    console.log("Filtered genomes array:", filtered);
+
+    // Set filtered genomes directly
     setFilteredGenomes(filtered);
   }, [
     searchQuery,
@@ -355,6 +632,7 @@ const NCBIGenomeSearch = ({
     geneCountRange,
     gcContentRange,
     genomes,
+    showAdvancedFilters,
   ]);
 
   const handleGenomeSelect = (genome: GenomeData) => {
@@ -371,17 +649,26 @@ const NCBIGenomeSearch = ({
   const handleSequenceDownload = async (genome: GenomeData) => {
     setIsLoading(true);
     try {
-      // Download CDS FASTA using GET request as specified by NCBI Datasets API documentation
+      console.log(
+        `Downloading sequence for ${genome.ncbiAccession || genome.id}`,
+      );
+      // Download CDS FASTA using POST request with JSON body
+      const downloadRequestData = {
+        accessions: [genome.ncbiAccession || genome.id],
+        include_annotation_type: ["CDS_FASTA", "GENOME_FASTA"], // Request both types for better quality
+        filename: `${genome.ncbiAccession || genome.id}_cds.fasta`,
+        // Request the data in a specific format
+        format: "fasta",
+      };
+
       const response = await axios({
-        method: "get",
-        url: `${NCBI_DATASETS_BASE_URL}/genome/accession/${genome.ncbiAccession || genome.id}/download`,
-        params: {
-          include_annotation_type: ["CDS_FASTA"],
-          filename: `${genome.ncbiAccession || genome.id}_cds.fasta`,
-        },
+        method: "post",
+        url: `${NCBI_DATASETS_BASE_URL}/genome/download`,
+        data: downloadRequestData,
         responseType: "blob",
         headers: {
-          Accept: "application/octet-stream",
+          "Content-Type": "application/json",
+          Accept: "text/plain, application/octet-stream",
           "api-key": NCBI_API_KEY,
         },
         timeout: 60000, // 60 second timeout for downloads
@@ -389,17 +676,82 @@ const NCBIGenomeSearch = ({
 
       // Check if we got a valid response
       if (response.data.size === 0) {
+        console.error("Empty file received");
         throw new Error("Empty file received");
       }
 
-      // Create and download the CDS FASTA file
-      const blob = new Blob([response.data], { type: "text/plain" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${genome.ncbiAccession || genome.id}_cds.fasta`;
-      a.click();
-      URL.revokeObjectURL(url);
+      console.log(
+        `Successfully downloaded sequence for ${genome.ncbiAccession || genome.id}, size: ${response.data.size} bytes`,
+      );
+
+      // Check if the response is a ZIP file (common format from NCBI)
+      const isZip =
+        response.headers["content-type"]?.includes("application/zip") ||
+        response.data.slice(0, 4).toString() === "PK\x03\x04" ||
+        (new Uint8Array(response.data.slice(0, 4))[0] === 0x50 &&
+          new Uint8Array(response.data.slice(0, 4))[1] === 0x4b);
+
+      if (isZip) {
+        console.log("Received ZIP file from NCBI, downloading as .zip");
+
+        // Try to extract and assess FASTA quality before downloading
+        try {
+          const fastaContent = await extractFastaFromZip(response.data);
+          if (fastaContent) {
+            const qualityScore = assessFastaQuality(fastaContent);
+            let qualityLabel = "Low";
+            if (qualityScore >= 80) qualityLabel = "High";
+            else if (qualityScore >= 50) qualityLabel = "Medium";
+
+            console.log(
+              `ZIP contains FASTA with quality score: ${qualityScore} (${qualityLabel})`,
+            );
+          }
+        } catch (extractError) {
+          console.error("Error assessing ZIP content quality:", extractError);
+        }
+
+        // Create and download as ZIP file
+        const blob = new Blob([response.data], { type: "application/zip" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `${genome.ncbiAccession || genome.id}_cds.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        // For direct FASTA content, assess quality before downloading
+        try {
+          const textData = await response.data.text();
+          const qualityScore = assessFastaQuality(textData);
+          let qualityLabel = "Low";
+          if (qualityScore >= 80) qualityLabel = "High";
+          else if (qualityScore >= 50) qualityLabel = "Medium";
+
+          console.log(
+            `Direct FASTA quality score: ${qualityScore} (${qualityLabel})`,
+          );
+
+          // Create and download the CDS FASTA file
+          const blob = new Blob([textData], { type: "text/plain" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${genome.ncbiAccession || genome.id}_cds_${qualityLabel.toLowerCase()}_quality.fasta`;
+          a.click();
+          URL.revokeObjectURL(url);
+        } catch (textError) {
+          console.error("Error processing text FASTA:", textError);
+          // Fallback to binary download if text processing fails
+          const blob = new Blob([response.data], { type: "text/plain" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${genome.ncbiAccession || genome.id}_cds.fasta`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      }
 
       onSequenceDownload(genome);
     } catch (error: any) {
@@ -407,28 +759,117 @@ const NCBIGenomeSearch = ({
 
       // Fallback: try to download genome FASTA if CDS fails
       try {
+        console.log(
+          `Attempting fallback download for ${genome.ncbiAccession || genome.id} using GENOME_FASTA`,
+        );
+        const fallbackRequestData = {
+          accessions: [genome.ncbiAccession || genome.id],
+          include_annotation_type: ["GENOME_FASTA"],
+          filename: `${genome.ncbiAccession || genome.id}_genome.fasta`,
+          // Request the data in a specific format
+          format: "fasta",
+        };
+
         const fallbackResponse = await axios({
-          method: "get",
-          url: `${NCBI_DATASETS_BASE_URL}/genome/accession/${genome.ncbiAccession || genome.id}/download`,
-          params: {
-            include_annotation_type: ["GENOME_FASTA"],
-            filename: `${genome.ncbiAccession || genome.id}_genome.fasta`,
-          },
+          method: "post",
+          url: `${NCBI_DATASETS_BASE_URL}/genome/download`,
+          data: fallbackRequestData,
           responseType: "blob",
           headers: {
-            Accept: "application/octet-stream",
+            "Content-Type": "application/json",
+            Accept: "text/plain, application/octet-stream",
             "api-key": NCBI_API_KEY,
           },
           timeout: 60000, // 60 second timeout for downloads
         });
 
-        const blob = new Blob([fallbackResponse.data], { type: "text/plain" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `${genome.ncbiAccession || genome.id}_genome.fasta`;
-        a.click();
-        URL.revokeObjectURL(url);
+        console.log(
+          `Fallback download successful, size: ${fallbackResponse.data.size} bytes`,
+        );
+
+        // Check if the fallback response is a ZIP file
+        const isZip =
+          fallbackResponse.headers["content-type"]?.includes(
+            "application/zip",
+          ) ||
+          fallbackResponse.data.slice(0, 4).toString() === "PK\x03\x04" ||
+          (new Uint8Array(fallbackResponse.data.slice(0, 4))[0] === 0x50 &&
+            new Uint8Array(fallbackResponse.data.slice(0, 4))[1] === 0x4b);
+
+        if (isZip) {
+          console.log(
+            "Received ZIP file from NCBI fallback, downloading as .zip",
+          );
+
+          // Try to extract and assess FASTA quality
+          try {
+            const fastaContent = await extractFastaFromZip(
+              fallbackResponse.data,
+            );
+            if (fastaContent) {
+              const qualityScore = assessFastaQuality(fastaContent);
+              let qualityLabel = "Low";
+              if (qualityScore >= 80) qualityLabel = "High";
+              else if (qualityScore >= 50) qualityLabel = "Medium";
+
+              console.log(
+                `Fallback ZIP contains FASTA with quality score: ${qualityScore} (${qualityLabel})`,
+              );
+            }
+          } catch (extractError) {
+            console.error(
+              "Error assessing fallback ZIP content quality:",
+              extractError,
+            );
+          }
+
+          // Create and download as ZIP file
+          const blob = new Blob([fallbackResponse.data], {
+            type: "application/zip",
+          });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${genome.ncbiAccession || genome.id}_genome.zip`;
+          a.click();
+          URL.revokeObjectURL(url);
+        } else {
+          // For direct FASTA content, assess quality
+          try {
+            const textData = await fallbackResponse.data.text();
+            const qualityScore = assessFastaQuality(textData);
+            let qualityLabel = "Low";
+            if (qualityScore >= 80) qualityLabel = "High";
+            else if (qualityScore >= 50) qualityLabel = "Medium";
+
+            console.log(
+              `Fallback direct FASTA quality score: ${qualityScore} (${qualityLabel})`,
+            );
+
+            // Create and download as FASTA file with quality label
+            const blob = new Blob([textData], {
+              type: "text/plain",
+            });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${genome.ncbiAccession || genome.id}_genome_${qualityLabel.toLowerCase()}_quality.fasta`;
+            a.click();
+            URL.revokeObjectURL(url);
+          } catch (textError) {
+            console.error("Error processing fallback text FASTA:", textError);
+            // Fallback to binary download
+            const blob = new Blob([fallbackResponse.data], {
+              type: "text/plain",
+            });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `${genome.ncbiAccession || genome.id}_genome.fasta`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }
+        }
 
         onSequenceDownload(genome);
       } catch (fallbackError: any) {
@@ -446,6 +887,102 @@ const NCBIGenomeSearch = ({
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Function to extract FASTA content from ZIP file
+  const extractFastaFromZip = async (zipData) => {
+    try {
+      // Use JSZip to handle ZIP files in the browser
+      const JSZip = await import("jszip");
+      const zip = new JSZip.default();
+      const contents = await zip.loadAsync(zipData);
+
+      // Look for FASTA files in the ZIP
+      let fastaContent = "";
+      let highestQualityFasta = { content: "", quality: 0 };
+
+      // First, try to find files with .fasta or .fa extension
+      const fastaFiles = Object.keys(contents.files).filter(
+        (filename) =>
+          filename.endsWith(".fasta") ||
+          filename.endsWith(".fa") ||
+          filename.includes("cds_from") ||
+          filename.includes("genomic.fna"),
+      );
+
+      if (fastaFiles.length === 0) {
+        console.warn("No FASTA files found in ZIP archive");
+        return null;
+      }
+
+      // Process each FASTA file to find the highest quality one
+      for (const filename of fastaFiles) {
+        const file = contents.files[filename];
+        if (!file.dir) {
+          const content = await file.async("string");
+
+          // Basic quality assessment
+          const quality = assessFastaQuality(content);
+          console.log(`FASTA file ${filename} quality score: ${quality}`);
+
+          if (quality > highestQualityFasta.quality) {
+            highestQualityFasta = { content, quality };
+          }
+        }
+      }
+
+      return highestQualityFasta.content;
+    } catch (error) {
+      console.error("Error extracting FASTA from ZIP:", error);
+      return null;
+    }
+  };
+
+  // Function to assess FASTA quality
+  const assessFastaQuality = (fastaContent) => {
+    if (!fastaContent) return 0;
+
+    // Basic quality metrics
+    const lines = fastaContent.split("\n");
+    const sequenceLines = lines.filter(
+      (line) => !line.startsWith(">") && line.trim().length > 0,
+    );
+    const sequence = sequenceLines.join("");
+
+    // Calculate quality score based on:
+    // 1. Sequence length (longer is better)
+    // 2. Number of N's (fewer is better)
+    // 3. GC content (closer to expected range is better)
+    const length = sequence.length;
+    const nCount = (sequence.match(/N/g) || []).length;
+    const gcCount = (sequence.match(/[GC]/g) || []).length;
+    const gcContent = length > 0 ? (gcCount / length) * 100 : 0;
+
+    // Quality formula - higher is better
+    let qualityScore = 0;
+
+    // Length score (0-50 points)
+    if (length > 1000000) qualityScore += 50;
+    else if (length > 500000) qualityScore += 40;
+    else if (length > 100000) qualityScore += 30;
+    else if (length > 10000) qualityScore += 20;
+    else if (length > 1000) qualityScore += 10;
+
+    // N content score (0-30 points)
+    const nPercentage = length > 0 ? (nCount / length) * 100 : 100;
+    if (nPercentage < 1) qualityScore += 30;
+    else if (nPercentage < 5) qualityScore += 20;
+    else if (nPercentage < 10) qualityScore += 10;
+
+    // GC content score (0-20 points)
+    // Most bacteria have GC content between 25% and 75%
+    if (gcContent >= 25 && gcContent <= 75) qualityScore += 20;
+    else if (gcContent >= 15 && gcContent <= 85) qualityScore += 10;
+
+    console.log(
+      `FASTA quality assessment: Length=${length}, N%=${nPercentage.toFixed(2)}, GC%=${gcContent.toFixed(2)}, Score=${qualityScore}`,
+    );
+    return qualityScore;
   };
 
   const handleBatchProcess = async () => {
@@ -466,27 +1003,91 @@ const NCBIGenomeSearch = ({
         genomesToProcess.map(async (genome) => {
           try {
             // Using NCBI Datasets API to get CDS FASTA sequence for batch processing
+            const batchDownloadRequestData = {
+              accessions: [genome.ncbiAccession || genome.id],
+              include_annotation_type: ["CDS_FASTA", "GENOME_FASTA"], // Request both CDS and genome FASTA
+              filename: `${genome.ncbiAccession || genome.id}_cds.fasta`,
+              format: "fasta", // Request FASTA format explicitly
+            };
+
             const response = await axios({
-              method: "get",
-              url: `${NCBI_DATASETS_BASE_URL}/genome/accession/${genome.ncbiAccession || genome.id}/download`,
-              params: {
-                include_annotation_type: ["CDS_FASTA"],
-                filename: `${genome.ncbiAccession || genome.id}_cds.fasta`,
-              },
-              responseType: "text",
+              method: "post",
+              url: `${NCBI_DATASETS_BASE_URL}/genome/download`,
+              data: batchDownloadRequestData,
+              responseType: "blob", // Use blob to handle both text and binary
               headers: {
-                Accept: "text/plain",
+                "Content-Type": "application/json",
+                Accept: "text/plain, application/zip", // Accept both formats
                 "api-key": NCBI_API_KEY,
               },
               timeout: 60000, // 60 second timeout for batch downloads
             });
 
-            // Store the CDS FASTA content directly
+            // Check if response is a ZIP file
+            const isZip =
+              response.headers["content-type"]?.includes("application/zip") ||
+              response.data.type === "application/zip" ||
+              response.data.type === "application/x-zip-compressed";
+
+            let fastaContent;
+            let fileQuality = "Medium";
+
+            if (isZip) {
+              console.log(
+                `Received ZIP file for ${genome.id}, extracting FASTA content...`,
+              );
+              // Extract FASTA from ZIP
+              fastaContent = await extractFastaFromZip(response.data);
+              if (!fastaContent) {
+                console.error(
+                  `Could not extract FASTA from ZIP for ${genome.id}`,
+                );
+                // Try fallback to genome FASTA
+                const fallbackRequestData = {
+                  accessions: [genome.ncbiAccession || genome.id],
+                  include_annotation_type: ["GENOME_FASTA"],
+                  filename: `${genome.ncbiAccession || genome.id}_genome.fasta`,
+                  format: "fasta",
+                };
+
+                const fallbackResponse = await axios({
+                  method: "post",
+                  url: `${NCBI_DATASETS_BASE_URL}/genome/download`,
+                  data: fallbackRequestData,
+                  responseType: "text",
+                  headers: {
+                    "Content-Type": "application/json",
+                    Accept: "text/plain",
+                    "api-key": NCBI_API_KEY,
+                  },
+                  timeout: 60000,
+                });
+
+                fastaContent = fallbackResponse.data;
+              }
+            } else {
+              // Direct FASTA content
+              const textData = await response.data.text();
+              fastaContent = textData;
+            }
+
+            // Assess quality of the FASTA content
+            const qualityScore = assessFastaQuality(fastaContent);
+            if (qualityScore >= 80) fileQuality = "High";
+            else if (qualityScore >= 50) fileQuality = "Medium";
+            else fileQuality = "Low";
+
+            console.log(
+              `Final FASTA quality for ${genome.id}: ${fileQuality} (score: ${qualityScore})`,
+            );
+
+            // Store the processed FASTA content
             return {
               ...genome,
-              fastaContent: response.data,
-              isZipFormat: false,
-              fileType: "CDS_FASTA",
+              fastaContent: fastaContent,
+              fastaQuality: fileQuality,
+              qualityScore: qualityScore,
+              fileType: isZip ? "Extracted from ZIP" : "Direct FASTA",
             };
           } catch (error) {
             console.error(`Error fetching sequence for ${genome.id}:`, error);
@@ -513,25 +1114,60 @@ const NCBIGenomeSearch = ({
 
   // Function to search for genomes by query using NCBI Datasets API
   const searchGenomesByQuery = async (query: string) => {
+    if (!query || query.trim() === "") {
+      setError("Please enter a search term");
+      return;
+    }
+
     setIsLoading(true);
     setError("");
 
     try {
-      // Using NCBI Datasets API for search with POST request - official v2alpha endpoint
+      if (DEBUG_MODE) {
+        console.log(`Searching for: "${query}"`);
+      }
+
+      // Check if the query looks like a GCF ID (NCBI RefSeq assembly accession)
+      const isGcfId = /^GCF_\d+\.\d+$/i.test(query.trim());
+
+      // Using NCBI Datasets API for search with POST request and JSON body
+      const searchRequestData = isGcfId
+        ? {
+            // For accession-based search
+            accessions: [query.trim()],
+            filters: {
+              source_database: ["RefSeq"],
+              exclude_paired_reports: true,
+              exclude_atypical: true,
+            },
+            returned_content: "COMPLETE",
+            page_size: 20,
+          }
+        : {
+            // For taxonomic search by species name
+            taxons: [query],
+            filters: {
+              source_database: ["RefSeq"],
+              assembly_level: ["Complete Genome"],
+              exclude_paired_reports: true,
+              exclude_atypical: true,
+            },
+            returned_content: "COMPLETE",
+            page_size: 20,
+          };
+
+      if (DEBUG_MODE) {
+        console.log(
+          "NCBI API Search Request URL:",
+          `${NCBI_DATASETS_BASE_URL}/genome/dataset_report`,
+        );
+        console.log("NCBI API Search Request Data:", searchRequestData);
+      }
+
       const response = await axios({
         method: "post",
         url: `${NCBI_DATASETS_BASE_URL}/genome/dataset_report`,
-        data: {
-          filters: {
-            assembly_source: "refseq",
-            assembly_level: ["complete_genome"],
-            search_text: query,
-            exclude_paired_reports: true,
-            exclude_atypical: true,
-          },
-          returned_content: "COMPLETE",
-          page_size: 20,
-        },
+        data: searchRequestData,
         headers: {
           "Content-Type": "application/json",
           Accept: "application/json",
@@ -540,7 +1176,10 @@ const NCBIGenomeSearch = ({
         timeout: 30000, // 30 second timeout
       });
 
-      console.log("Search API Response:", response.data);
+      if (DEBUG_MODE) {
+        console.log("Search API Response:", response.data);
+        console.log("Response structure keys:", Object.keys(response.data));
+      }
 
       if (!response.data) {
         throw new Error("No data received from NCBI Datasets API");
@@ -554,12 +1193,45 @@ const NCBIGenomeSearch = ({
         searchReports = response.data;
       } else if (response.data.assemblies) {
         searchReports = response.data.assemblies;
+      } else if (response.data.assemblies_by_taxid) {
+        // Handle v2alpha API response structure
+        const assembliesData = Object.values(
+          response.data.assemblies_by_taxid || {},
+        );
+        searchReports = assembliesData.flatMap(
+          (taxData: any) => taxData.assemblies || [],
+        );
+      } else if (response.data.assemblies_by_accession) {
+        // Alternative v2alpha API response structure
+        searchReports = Object.values(
+          response.data.assemblies_by_accession || {},
+        );
+      } else if (response.data.assemblies_by_taxid) {
+        // Handle v2alpha API response structure
+        const assembliesData = Object.values(
+          response.data.assemblies_by_taxid || {},
+        );
+        searchReports = assembliesData.flatMap(
+          (taxData: any) => taxData.assemblies || [],
+        );
       } else {
-        console.warn("No matching genomes found for query:", query);
-        setError("No genomes found matching your search criteria");
-        setGenomes([]);
-        setFilteredGenomes([]);
-        return;
+        // Check if the response data itself might be a report
+        if (
+          response.data &&
+          typeof response.data === "object" &&
+          (response.data.accession ||
+            response.data.assembly_info ||
+            response.data.organism)
+        ) {
+          console.log("Found single report object in response data");
+          searchReports = [response.data];
+        } else {
+          console.warn("No matching genomes found for query:", query);
+          setError("No genomes found matching your search criteria");
+          setGenomes([]);
+          setFilteredGenomes([]);
+          return;
+        }
       }
 
       if (searchReports.length === 0) {
@@ -570,39 +1242,109 @@ const NCBIGenomeSearch = ({
       }
 
       // Process genome reports from Datasets API
-      const genomeDetails = searchReports.map((report: any) => {
-        const assembly = report.assembly_info || {};
-        const organism = report.organism || {};
-        const annotation = report.annotation_info || {};
-        const assemblyStats = assembly.assembly_stats || {};
+      const genomeDetails = searchReports
+        .filter((report) => report !== null && typeof report === "object")
+        .map((report: any) => {
+          if (DEBUG_MODE) {
+            console.log("Processing report:", report);
+          }
 
-        return {
-          id: assembly.assembly_accession || report.accession,
-          organism: organism.organism_name || "Unknown organism",
-          species:
-            organism.organism_name?.split(" ").slice(0, 2).join(" ") ||
-            "Unknown species",
-          strain: organism.infraspecific_names?.strain || undefined,
-          taxonomy: organism.tax_id ? `Tax ID: ${organism.tax_id}` : "Bacteria",
-          size: assemblyStats.total_sequence_length || 0,
-          genes: annotation.stats?.gene_counts?.total || 0,
-          proteins: annotation.stats?.gene_counts?.protein_coding || 0,
-          description:
-            assembly.assembly_name ||
-            organism.organism_name ||
-            "Bacterial genome",
-          source: "NCBI",
-          ncbiId: report.accession,
-          ncbiAccession: assembly.assembly_accession || report.accession,
-          gcContent: assemblyStats.gc_percent || 50,
-          sequenceAvailable: true,
-        };
-      });
+          try {
+            // Handle the new v2alpha API response structure
+            const assembly = report.assembly_info || {};
+            const organism = report.organism || {};
+            const annotation = report.annotation_info || {};
+            const assemblyStats =
+              report.assembly_stats || assembly.assembly_stats || {};
 
-      const validGenomes = genomeDetails.filter(Boolean) as GenomeData[];
+            // Extract organism name from various possible locations
+            const organismName = organism.organism_name || "Unknown organism";
 
+            // Extract accession - use the main accession field
+            const accession = report.accession || report.current_accession;
+
+            // If we don't have an accession, try to extract it from the console log format
+            let extractedAccession = accession;
+            if (!extractedAccession && typeof report === "object") {
+              // Try to find accession in the format shown in the console logs
+              const keys = Object.keys(report);
+              for (const key of keys) {
+                if (key === "accession" && typeof report[key] === "string") {
+                  extractedAccession = report[key];
+                  break;
+                }
+              }
+            }
+
+            // Convert size from string to number if needed
+            const sizeValue = assemblyStats.total_sequence_length;
+            const genomeSizeNumber =
+              typeof sizeValue === "string"
+                ? parseInt(sizeValue, 10)
+                : sizeValue || 0;
+
+            const processedGenome = {
+              id:
+                extractedAccession ||
+                "unknown-id-" + Math.random().toString(36).substring(2, 9),
+              organism: organismName,
+              species:
+                organismName.split(" ").slice(0, 2).join(" ") ||
+                "Unknown species",
+              strain: organism.infraspecific_names?.strain || undefined,
+              taxonomy: organism.tax_id
+                ? `Tax ID: ${organism.tax_id}`
+                : "Bacteria",
+              size: genomeSizeNumber,
+              genes: annotation.stats?.gene_counts?.total || 0,
+              proteins: annotation.stats?.gene_counts?.protein_coding || 0,
+              description:
+                assembly.assembly_name || organismName || "Bacterial genome",
+              source: "NCBI" as const,
+              ncbiId: extractedAccession,
+              ncbiAccession: extractedAccession,
+              gcContent: assemblyStats.gc_percent || 50,
+              sequenceAvailable: true,
+            };
+
+            if (DEBUG_MODE) {
+              console.log("Processed genome:", processedGenome);
+            }
+
+            return processedGenome;
+          } catch (err) {
+            console.error("Error processing genome report:", err, report);
+            return null;
+          }
+        })
+        .filter(Boolean);
+
+      const validGenomes = genomeDetails.filter((genome) => {
+        return genome && genome.id && genome.organism;
+      }) as GenomeData[];
+
+      if (DEBUG_MODE) {
+        console.log("Valid search genomes processed:", validGenomes.length);
+        console.log("First few search genomes:", validGenomes.slice(0, 3));
+      }
+
+      // Set genomes state
       setGenomes(validGenomes);
+
+      // Set filtered genomes to show all search results initially
       setFilteredGenomes(validGenomes);
+
+      // Preserve advanced filters when performing a search
+      // Only reset the basic filters
+      setSelectedSpecies("all");
+      setSelectedVariant("all");
+      setSelectedTaxonomy("all");
+      // Don't reset advanced filters: setShowAdvancedFilters(false);
+
+      // If we found exactly one genome that matches a GCF ID, select it automatically
+      if (validGenomes.length === 1 && /^GCF_\d+\.\d+$/i.test(query.trim())) {
+        setSelectedGenomes(new Set([validGenomes[0].id]));
+      }
     } catch (error: any) {
       console.error("Error searching genomes:", error);
       if (error.response) {
@@ -713,7 +1455,7 @@ const NCBIGenomeSearch = ({
                     <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
                     <Input
                       id="search"
-                      placeholder="Search by ID, organism, strain..."
+                      placeholder="Search by name, GCF ID, strain..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="pl-10"
@@ -961,6 +1703,12 @@ const NCBIGenomeSearch = ({
 
             {/* Genomes Table */}
             <div className="border rounded-lg bg-white">
+              {/* Debug info */}
+              <div className="p-2 bg-gray-100 text-xs text-gray-600">
+                Debug: Rendering {filteredGenomes.length} genomes out of{" "}
+                {genomes.length} total
+              </div>
+
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -975,96 +1723,137 @@ const NCBIGenomeSearch = ({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredGenomes.map((genome) => (
-                    <TableRow key={genome.id} className="hover:bg-blue-50">
-                      <TableCell>
-                        <input
-                          type="checkbox"
-                          checked={selectedGenomes.has(genome.id)}
-                          onChange={() => handleGenomeSelect(genome)}
-                          className="rounded border-gray-300"
-                        />
-                      </TableCell>
-                      <TableCell className="font-mono font-medium text-blue-700">
-                        {genome.id}
-                      </TableCell>
-                      <TableCell>
-                        <div>
-                          <div className="font-medium">{genome.organism}</div>
-                          <div className="text-sm text-gray-500">
-                            {genome.species}
+                  {filteredGenomes.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={8}
+                        className="text-center py-8 text-gray-500"
+                      >
+                        {isLoading ? (
+                          <div className="flex items-center justify-center">
+                            <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                            Loading genomes...
                           </div>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <div className="text-sm">
-                          {genome.strain && (
-                            <div className="font-medium">{genome.strain}</div>
-                          )}
-                          {genome.variant && (
-                            <div className="text-gray-600">
-                              {genome.variant}
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-mono">
-                        {(genome.size / 1000000).toFixed(2)}
-                      </TableCell>
-                      <TableCell className="font-mono">
-                        {genome.gcContent?.toFixed(1) || "N/A"}
-                      </TableCell>
-                      <TableCell className="font-mono">
-                        {genome.genes.toLocaleString()}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center space-x-2">
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleSequenceDownload(genome)}
-                                  disabled={
-                                    !genome.sequenceAvailable || isLoading
-                                  }
-                                >
-                                  <Download className="h-4 w-4" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>Download CDS FASTA sequence</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => {
-                                    if (genome.ncbiAccession) {
-                                      window.open(
-                                        `https://www.ncbi.nlm.nih.gov/datasets/genome/${genome.ncbiAccession}`,
-                                        "_blank",
-                                      );
-                                    }
-                                  }}
-                                >
-                                  <ExternalLink className="h-4 w-4" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>View in NCBI database</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        </div>
+                        ) : genomes.length === 0 ? (
+                          "No genomes available. Click 'Search NCBI' to fetch data."
+                        ) : (
+                          "No genomes match the current filters."
+                        )}
                       </TableCell>
                     </TableRow>
-                  ))}
+                  ) : (
+                    filteredGenomes.map((genome, index) => {
+                      console.log(`Rendering genome ${index}:`, genome);
+                      return (
+                        <TableRow
+                          key={genome.id || `genome-${index}`}
+                          className="hover:bg-blue-50"
+                        >
+                          <TableCell>
+                            <input
+                              type="checkbox"
+                              checked={selectedGenomes.has(genome.id)}
+                              onChange={() => handleGenomeSelect(genome)}
+                              className="rounded border-gray-300"
+                            />
+                          </TableCell>
+                          <TableCell className="font-mono font-medium text-blue-700">
+                            {genome.id || "N/A"}
+                          </TableCell>
+                          <TableCell>
+                            <div>
+                              <div className="font-medium">
+                                {genome.organism || "Unknown"}
+                              </div>
+                              <div className="text-sm text-gray-500">
+                                {genome.species || "Unknown species"}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="text-sm">
+                              {genome.strain && (
+                                <div className="font-medium">
+                                  {genome.strain}
+                                </div>
+                              )}
+                              {genome.variant && (
+                                <div className="text-gray-600">
+                                  {genome.variant}
+                                </div>
+                              )}
+                              {!genome.strain && !genome.variant && (
+                                <div className="text-gray-400">N/A</div>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-mono">
+                            {genome.size
+                              ? (genome.size / 1000000).toFixed(2)
+                              : "N/A"}
+                          </TableCell>
+                          <TableCell className="font-mono">
+                            {genome.gcContent?.toFixed(1) || "N/A"}
+                          </TableCell>
+                          <TableCell className="font-mono">
+                            {genome.genes
+                              ? genome.genes.toLocaleString()
+                              : "N/A"}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center space-x-2">
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() =>
+                                        handleSequenceDownload(genome)
+                                      }
+                                      disabled={
+                                        !genome.sequenceAvailable || isLoading
+                                      }
+                                    >
+                                      <Download className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>
+                                      Download CDS sequence (may be ZIP file)
+                                    </p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() => {
+                                        if (genome.ncbiAccession) {
+                                          window.open(
+                                            `https://www.ncbi.nlm.nih.gov/datasets/genome/${genome.ncbiAccession}`,
+                                            "_blank",
+                                          );
+                                        }
+                                      }}
+                                    >
+                                      <ExternalLink className="h-4 w-4" />
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p>View in NCBI database</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
                 </TableBody>
               </Table>
             </div>
