@@ -1,166 +1,230 @@
-import { GeneticMarker } from "../resistancePredictor";
+// Mock implementation instead of using ml-xgboost
+// import { XGBoost } from 'ml-xgboost';
+
+export interface XGBoostModelOptions {
+  maxDepth?: number;
+  eta?: number;
+  nEstimators?: number;
+  objective?: string;
+  boosterType?: string;
+  seed?: number;
+}
 
 export interface ModelTrainingResult {
   accuracy: number;
+  precision: number;
+  recall: number;
   f1Score: number;
-  jaccardScore: number;
   confusionMatrix: number[][];
-  trainTime: number;
-  modelSize: number;
-  featureImportance: FeatureImportance[];
+  featureImportance: { feature: string; importance: number }[];
 }
 
-export interface FeatureImportance {
-  feature: string;
-  importance: number;
-}
+// Mock XGBoost class for demonstration
+class XGBoostMock {
+  private options: any;
+  private featureScores: Record<string, number> = {};
 
-export interface XGBoostParameters {
-  learningRate: number;
-  maxDepth: number;
-  nEstimators: number;
-  subsample: number;
-  colsampleByTree: number;
-  objective: string;
-}
-
-export class XGBoostModel {
-  private parameters: XGBoostParameters;
-  private trained: boolean = false;
-  private featureImportance: FeatureImportance[] = [];
-  
-  constructor(params?: Partial<XGBoostParameters>) {
-    // Default parameters
-    this.parameters = {
-      learningRate: 0.1,
-      maxDepth: 6,
-      nEstimators: 100,
-      subsample: 0.8,
-      colsampleByTree: 0.8,
-      objective: 'multi:softmax',
-      ...params
-    };
+  constructor(options: any) {
+    this.options = options;
+    // Generate random feature scores
+    for (let i = 0; i < 10; i++) {
+      this.featureScores[i.toString()] = Math.random();
+    }
   }
-  
-  /**
-   * Train the XGBoost model on the provided feature matrix and labels
-   * @param featureMatrix - Matrix of k-mer features (X)
-   * @param labels - Antibiotic resistance labels (Y)
-   * @param validationSplit - Percentage of data to use for validation
-   */
-  public async train(
-    featureMatrix: number[][],
-    labels: string[],
-    validationSplit: number = 0.2
-  ): Promise<ModelTrainingResult> {
-    console.log(`Training XGBoost model with parameters:`, this.parameters);
-    console.log(`Feature matrix shape: ${featureMatrix.length} x ${featureMatrix[0]?.length || 0}`);
-    console.log(`Labels length: ${labels.length}`);
-    
-    // Simulate training process
-    const startTime = Date.now();
-    
-    // In a real implementation, this would use the XGBoost library
-    // For simulation, we'll just wait and generate mock results
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Generate mock feature importance
-    this.featureImportance = this.generateMockFeatureImportance(10);
-    
-    this.trained = true;
-    const endTime = Date.now();
-    
-    // Return mock training results
+
+  async train(features: number[][], labels: number[]): Promise<void> {
+    console.log('Training mock XGBoost model...');
+    // Simulate training delay
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
+
+  async predict(features: number[][]): Promise<number[]> {
+    // Return random predictions
+    return features.map(() => Math.random() > 0.5 ? 1 : 0);
+  }
+
+  getBooster() {
     return {
-      accuracy: 0.92,
-      f1Score: 0.89,
-      jaccardScore: 0.85,
-      confusionMatrix: [
-        [45, 3, 2],
-        [4, 38, 3],
-        [1, 2, 42]
-      ],
-      trainTime: (endTime - startTime) / 1000, // seconds
-      modelSize: 2.4, // MB
-      featureImportance: this.featureImportance
+      getFeatureScores: () => this.featureScores
+    };
+  }
+
+  static async load(filepath: string): Promise<XGBoostMock> {
+    console.log(`Loading model from ${filepath}`);
+    return new XGBoostMock({});
+  }
+
+  async save(filepath: string): Promise<void> {
+    console.log(`Saving model to ${filepath}`);
+  }
+}
+
+export class XGBoostAMRModel {
+  private model: any;
+  private featureNames: string[] = [];
+  private options: XGBoostModelOptions;
+  private trained: boolean = false;
+  
+  constructor(options: XGBoostModelOptions = {}) {
+    this.options = {
+      maxDepth: 6,
+      eta: 0.3,
+      nEstimators: 100,
+      objective: 'binary:logistic',
+      boosterType: 'gbtree',
+      seed: 42,
+      ...options
     };
   }
   
   /**
-   * Predict antibiotic resistance for new samples
-   * @param features - Feature vector for the new sample
+   * Train the XGBoost model
+   * @param featureMatrix Feature matrix (samples x features)
+   * @param labels Binary labels (1 for resistant, 0 for susceptible)
+   * @param featureNames Names of the features (k-mers)
+   * @returns Training result metrics
    */
-  public predict(features: number[]): string {
-    if (!this.trained) {
-      throw new Error("Model must be trained before making predictions");
-    }
+  async train(
+    featureMatrix: number[][],
+    labels: number[],
+    featureNames: string[]
+  ): Promise<ModelTrainingResult> {
+    console.log(`Training XGBoost model with ${featureMatrix.length} samples and ${featureMatrix[0]?.length || 0} features`);
     
-    // In a real implementation, this would use the trained XGBoost model
-    // For simulation, we'll return a random prediction
-    const predictions = ["S", "I", "R"];
-    return predictions[Math.floor(Math.random() * predictions.length)];
-  }
-  
-  /**
-   * Save the trained model to a file
-   * @param filepath - Path to save the model
-   */
-  public saveModel(filepath: string): void {
-    if (!this.trained) {
-      throw new Error("Cannot save untrained model");
-    }
+    this.featureNames = featureNames;
     
-    console.log(`XGBoost model saved to ${filepath}`);
-  }
-  
-  /**
-   * Load a pre-trained model from a file
-   * @param filepath - Path to the saved model
-   */
-  public loadModel(filepath: string): void {
-    // In a real implementation, this would load the model from a file
-    console.log(`XGBoost model loaded from ${filepath}`);
+    // Filter out samples with unknown labels
+    const validIndices = labels.map((label, i) => label !== -1 ? i : -1).filter(i => i !== -1);
+    const filteredFeatures = validIndices.map(i => featureMatrix[i]);
+    const filteredLabels = validIndices.map(i => labels[i]);
+    
+    console.log(`Using ${filteredFeatures.length} samples with known labels`);
+    
+    // Create and train the model
+    this.model = new XGBoostMock({
+      booster: this.options.boosterType,
+      objective: this.options.objective,
+      max_depth: this.options.maxDepth,
+      eta: this.options.eta,
+      nEstimators: this.options.nEstimators,
+      seed: this.options.seed
+    });
+    
+    await this.model.train(filteredFeatures, filteredLabels);
     this.trained = true;
+    
+    // Evaluate on training data
+    const predictions = await this.predict(filteredFeatures);
+    const metrics = this.evaluateMetrics(filteredLabels, predictions);
+    
+    return {
+      ...metrics,
+      featureImportance: this.getFeatureImportance()
+    };
+  }
+  
+  /**
+   * Make predictions with the trained model
+   * @param features Feature matrix or single feature vector
+   * @returns Predicted probabilities or labels
+   */
+  async predict(features: number[][] | number[]): Promise<number[]> {
+    if (!this.trained) {
+      throw new Error('Model must be trained before making predictions');
+    }
+    
+    // Handle single feature vector
+    const featureMatrix = Array.isArray(features[0]) ? features as number[][] : [features as number[]];
+    
+    // Get raw predictions (probabilities)
+    const rawPredictions = await this.model.predict(featureMatrix);
+    
+    // Convert probabilities to binary labels (threshold at 0.5)
+    return rawPredictions.map((prob: number) => prob >= 0.5 ? 1 : 0);
   }
   
   /**
    * Get feature importance from the trained model
+   * @returns Array of feature importance scores
    */
-  public getFeatureImportance(): FeatureImportance[] {
+  getFeatureImportance(): { feature: string; importance: number }[] {
     if (!this.trained) {
-      throw new Error("Model must be trained before getting feature importance");
+      throw new Error('Model must be trained before getting feature importance');
     }
     
-    return this.featureImportance;
+    // Get feature importance scores from the model
+    const scores = this.model.getBooster().getFeatureScores();
+    
+    // Map scores to feature names
+    const importance = Object.entries(scores).map(([index, score]) => ({
+      feature: this.featureNames[parseInt(index)] || `feature_${index}`,
+      importance: score as number
+    }));
+    
+    // Sort by importance (descending)
+    return importance.sort((a, b) => b.importance - a.importance);
   }
   
   /**
-   * Generate mock feature importance for demonstration
+   * Save the model to a file
+   * @param filepath Path to save the model
    */
-  private generateMockFeatureImportance(count: number): FeatureImportance[] {
-    const features = [
-      "kmer_ACGT", "kmer_TCGA", "kmer_GCTA", "kmer_ATGC", 
-      "kmer_CGAT", "kmer_TAGC", "kmer_GACT", "kmer_CTAG",
-      "kmer_AGCT", "kmer_TGCA", "kmer_CATG", "kmer_GTAC"
-    ];
-    
-    const result: FeatureImportance[] = [];
-    const usedFeatures = new Set<string>();
-    
-    for (let i = 0; i < count; i++) {
-      let feature;
-      do {
-        feature = features[Math.floor(Math.random() * features.length)];
-      } while (usedFeatures.has(feature));
-      
-      usedFeatures.add(feature);
-      result.push({
-        feature,
-        importance: Math.random() * 0.5 + 0.1 // Random importance between 0.1 and 0.6
-      });
+  async saveModel(filepath: string): Promise<void> {
+    if (!this.trained) {
+      throw new Error('Model must be trained before saving');
     }
     
-    // Sort by importance (descending)
-    return result.sort((a, b) => b.importance - a.importance);
+    // Save the model
+    await this.model.save(filepath);
+    console.log(`Model saved to ${filepath}`);
+  }
+  
+  /**
+   * Load a pre-trained model
+   * @param filepath Path to the saved model
+   */
+  async loadModel(filepath: string): Promise<void> {
+    this.model = await XGBoostMock.load(filepath);
+    this.trained = true;
+    console.log(`Model loaded from ${filepath}`);
+  }
+  
+  /**
+   * Evaluate model performance metrics
+   * @param trueLabels True labels
+   * @param predictions Predicted labels
+   * @returns Performance metrics
+   */
+  private evaluateMetrics(trueLabels: number[], predictions: number[]): {
+    accuracy: number;
+    precision: number;
+    recall: number;
+    f1Score: number;
+    confusionMatrix: number[][];
+  } {
+    // Initialize confusion matrix [TN, FP, FN, TP]
+    let tn = 0, fp = 0, fn = 0, tp = 0;
+    
+    // Calculate confusion matrix
+    for (let i = 0; i < trueLabels.length; i++) {
+      if (trueLabels[i] === 1 && predictions[i] === 1) tp++;
+      else if (trueLabels[i] === 1 && predictions[i] === 0) fn++;
+      else if (trueLabels[i] === 0 && predictions[i] === 1) fp++;
+      else if (trueLabels[i] === 0 && predictions[i] === 0) tn++;
+    }
+    
+    // Calculate metrics
+    const accuracy = (tp + tn) / (tp + tn + fp + fn);
+    const precision = tp / (tp + fp) || 0;
+    const recall = tp / (tp + fn) || 0;
+    const f1Score = 2 * precision * recall / (precision + recall) || 0;
+    
+    return {
+      accuracy,
+      precision,
+      recall,
+      f1Score,
+      confusionMatrix: [[tn, fp], [fn, tp]]
+    };
   }
 }
