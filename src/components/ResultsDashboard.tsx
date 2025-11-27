@@ -108,17 +108,27 @@ const ResultsDashboard = ({
                 <span className="font-medium">Analyzed:</span> {timestamp}
               </CardDescription>
               {analysisSummary && (
-                <div className="mt-2 flex items-center gap-4 text-sm text-gray-600">
-                  <span className="flex items-center">
-                    <Database className="mr-1 h-4 w-4" />
-                    Sequence:{" "}
-                    {(analysisSummary.sequenceLength / 1000000).toFixed(1)}M bp
-                  </span>
-                  <span>Quality: {analysisSummary.sequenceQuality}</span>
-                  <span>GC: {analysisSummary.gcContent}%</span>
-                  <span>
-                    Resistance genes: {analysisSummary.resistanceGenesFound}
-                  </span>
+                <div className="mt-2 space-y-2">
+                  <div className="flex items-center gap-4 text-sm text-gray-600">
+                    <span className="flex items-center">
+                      <Database className="mr-1 h-4 w-4" />
+                      Sequence:{" "}
+                      {(analysisSummary.sequenceLength / 1000000).toFixed(1)}M bp
+                    </span>
+                    <span>Quality: {analysisSummary.sequenceQuality}</span>
+                    <span>GC: {analysisSummary.gcContent}%</span>
+                    {analysisSummary.modelUsed && (
+                      <span>Model: {analysisSummary.modelUsed}</span>
+                    )}
+                  </div>
+                  {analysisSummary.similarGenomes && analysisSummary.similarGenomes.length > 0 && (
+                    <div className="flex items-center gap-2 text-sm text-blue-600">
+                      <Info className="h-4 w-4" />
+                      <span>
+                        Found {analysisSummary.similarGenomes.length} similar genomes in training data
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -248,11 +258,48 @@ const ResultsDashboard = ({
             </TabsContent>
 
             <TabsContent value="explainability">
-              <ExplainabilityView
-                predictions={predictions}
-                genomeId={sampleName}
-                analysisSummary={analysisSummary}
-              />
+              <div className="space-y-6">
+                {/* Similar Genomes Section */}
+                {analysisSummary?.similarGenomes && analysisSummary.similarGenomes.length > 0 && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-lg">Similar Genomes Found</CardTitle>
+                      <CardDescription>
+                        Top matches from the training database based on k-mer similarity
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="space-y-3">
+                        {analysisSummary.similarGenomes.map((genome: any, idx: number) => (
+                          <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
+                            <div>
+                              <p className="font-medium">{genome.genome_id || 'Unknown ID'}</p>
+                              <p className="text-sm text-gray-600">{genome.species || 'Unknown species'}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-lg font-bold text-blue-600">
+                                {(genome.similarity_score * 100).toFixed(1)}%
+                              </p>
+                              <p className="text-xs text-gray-500">similarity</p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-4 text-sm text-gray-600">
+                        💡 These genomes share similar k-mer patterns with your uploaded genome. 
+                        The prediction is based on resistance patterns observed in these and other training samples.
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
+                
+                {/* Explainability View */}
+                <ExplainabilityView
+                  predictions={predictions}
+                  genomeId={sampleName}
+                  analysisSummary={analysisSummary}
+                />
+              </div>
             </TabsContent>
           </Tabs>
         </CardContent>

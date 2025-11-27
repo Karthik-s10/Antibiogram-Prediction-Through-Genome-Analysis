@@ -3,6 +3,18 @@
 @tailwind utilities;
 
 @layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-transparent text-foreground;
+    margin: 0;
+    padding: 0;
+  }
+  html {
+    @apply bg-transparent;
+  }
+  
   :root {
     --background: 0 0% 100%;
     --foreground: 222.2 84% 4.9%;
@@ -66,15 +78,6 @@
   }
 }
 
-@layer base {
-  * {
-    @apply border-border;
-  }
-  body {
-    @apply bg-gradient-to-br from-emerald-50 via-teal-50 to-blue-50 text-foreground;
-    min-height: 100vh;
-  }
-}
 
 @layer components {
   .gradient-border {

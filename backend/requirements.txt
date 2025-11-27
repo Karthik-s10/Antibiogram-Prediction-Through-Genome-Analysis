@@ -1,0 +1,52 @@
+# ============================================================================
+# Visual C++ Redistributables (Auto-downloaded to venv)
+# ============================================================================
+# IMPORTANT: Run these commands from the backend directory!
+#
+# After pip install, run:
+#   cd backend
+#   python -c "import install_vc_redist; install_vc_redist.main()"
+#
+# Or use the install script (runs from any directory):
+#   backend\install.bat (Windows) or backend\install.ps1 (PowerShell)
+#
+# This downloads vc_redist.x64.exe to venv/vc_redist/ and installs it
+# Download URL: https://aka.ms/vs/17/release/vc_redist.x64.exe
+# ============================================================================
+
+# FastAPI and server
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+
+# ML and data processing
+xgboost==2.0.3
+transformers==4.37.2
+
+# PyTorch with GPU support (CUDA 12.1) - Default installation
+# This will automatically use GPU version if available
+# For CUDA 11.8, change to: --extra-index-url https://download.pytorch.org/whl/cu118
+# For CPU only, remove the --extra-index-url line
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
+datasets==2.16.1
+scikit-learn==1.4.0
+pandas==2.2.0
+numpy==1.26.3
+accelerate==0.26.1
+
+# Bioinformatics
+biopython==1.83
+
+# Database and storage
+qdrant-client==1.7.3
+supabase==2.3.4
+
+# Utilities
+python-dotenv==1.0.1
+pydantic==2.5.3
+pydantic-settings==2.1.0
+

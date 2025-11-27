@@ -14,9 +14,10 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { InfoIcon, ZoomInIcon, ZoomOutIcon } from "lucide-react";
+import { InfoIcon, ZoomInIcon, ZoomOutIcon, Dna } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PredictionResult } from "@/lib/resistancePredictor";
+import DNAHelixVisualization from "./DNAHelixVisualization";
 
 interface ExplainabilityViewProps {
   predictions?: PredictionResult[];
@@ -33,7 +34,7 @@ const ExplainabilityView: React.FC<ExplainabilityViewProps> = ({
     predictions[0]?.antibiotic || "",
   );
   const [zoomLevel, setZoomLevel] = useState<number>(1);
-  const [viewMode, setViewMode] = useState<"heatmap" | "network">("heatmap");
+  const [viewMode, setViewMode] = useState<"heatmap" | "network" | "dna-helix">("heatmap");
 
   const selectedData = predictions.find(
     (item) => item.antibiotic === selectedAntibiotic,
@@ -101,12 +102,16 @@ const ExplainabilityView: React.FC<ExplainabilityViewProps> = ({
           <Tabs
             defaultValue="heatmap"
             onValueChange={(value) =>
-              setViewMode(value as "heatmap" | "network")
+              setViewMode(value as "heatmap" | "network" | "dna-helix")
             }
           >
             <TabsList>
               <TabsTrigger value="heatmap">Heatmap View</TabsTrigger>
               <TabsTrigger value="network">Network View</TabsTrigger>
+              <TabsTrigger value="dna-helix">
+                <Dna className="mr-2 h-4 w-4" />
+                DNA Helix
+              </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
@@ -247,6 +252,17 @@ const ExplainabilityView: React.FC<ExplainabilityViewProps> = ({
               predictions={predictions}
               selectedAntibiotic={selectedAntibiotic}
               zoomLevel={zoomLevel}
+            />
+          </div>
+        )}
+
+        {viewMode === "dna-helix" && (
+          <div className="border rounded-md bg-gray-50 overflow-hidden">
+            <DNAHelixVisualization
+              predictions={predictions}
+              genomeId={genomeId}
+              width={800}
+              height={500}
             />
           </div>
         )}

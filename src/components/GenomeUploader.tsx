@@ -180,7 +180,7 @@ const GenomeUploader = ({
   }, [isProcessing]);
 
   return (
-    <Card className="w-full max-w-3xl mx-auto bg-gradient-to-br from-emerald-50 via-teal-50 to-blue-50 border-2 border-gradient-to-r from-emerald-200 to-blue-200 shadow-xl">
+    <Card className="w-full max-w-3xl mx-auto bg-card border shadow-lg">
       <CardContent className="p-6">
         <div className="text-center mb-6">
           <div className="flex items-center justify-center mb-3">
@@ -222,8 +222,8 @@ const GenomeUploader = ({
         <div
           className={`border-3 border-dashed rounded-xl p-8 text-center transition-all duration-300 transform hover:scale-105 ${
             isDragging
-              ? "border-emerald-400 bg-gradient-to-br from-emerald-100 to-blue-100 shadow-lg"
-              : "border-emerald-300 hover:border-emerald-400 bg-gradient-to-br from-emerald-50 to-blue-50 hover:shadow-md"
+              ? "border-primary bg-primary/10 shadow-lg"
+              : "border-muted-foreground/30 hover:border-primary bg-muted/20 hover:shadow-md"
           }`}
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
@@ -238,30 +238,30 @@ const GenomeUploader = ({
           />
 
           <div className="flex flex-col items-center justify-center space-y-4">
-            <div className="p-4 rounded-full bg-gradient-to-br from-emerald-200 to-blue-200 animate-pulse">
-              <Upload className="h-10 w-10 text-emerald-600" />
+            <div className="p-4 rounded-full bg-primary/20 animate-pulse">
+              <Upload className="h-10 w-10 text-primary" />
             </div>
             <div>
-              <p className="text-xl font-semibold bg-gradient-to-r from-emerald-600 to-blue-600 bg-clip-text text-transparent">
+              <p className="text-xl font-semibold text-foreground">
                 Drag and drop your FASTA file here
               </p>
-              <p className="text-sm text-gray-600 mt-1 font-medium">or</p>
+              <p className="text-sm text-muted-foreground mt-1 font-medium">or</p>
               <Button
                 onClick={handleBrowseClick}
-                className="mt-3 bg-gradient-to-r from-emerald-500 to-blue-500 hover:from-emerald-600 hover:to-blue-600 text-white font-semibold px-6 py-2 rounded-full shadow-lg transform hover:scale-105 transition-all duration-200"
+                className="mt-3 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold px-6 py-2 rounded-full shadow-lg transform hover:scale-105 transition-all duration-200"
                 disabled={isProcessing}
               >
                 Browse Files
               </Button>
             </div>
-            <p className="text-sm text-gray-600 font-medium">
+            <p className="text-sm text-muted-foreground font-medium">
               📁 Supported formats: .fasta, .fa (max 50MB)
             </p>
           </div>
         </div>
 
         {file && !isProcessing && validationStatus === "success" && (
-          <div className="mt-4 p-4 bg-gradient-to-r from-green-100 to-emerald-100 rounded-xl flex items-center border-2 border-green-200 shadow-md">
+          <div className="mt-4 p-4 bg-green-50 rounded-xl flex items-center border border-green-200 shadow-md">
             <CheckCircle className="h-6 w-6 text-green-600 mr-3 animate-bounce" />
             <span className="text-sm text-green-800 font-semibold">
               🎉 {file.name} ({(file.size / (1024 * 1024)).toFixed(2)} MB) ready
@@ -274,34 +274,34 @@ const GenomeUploader = ({
           <div className="mt-6 space-y-4">
             <div className="flex justify-between items-center">
               <div className="flex items-center">
-                <Sparkles className="h-5 w-5 text-emerald-600 mr-2 animate-spin" />
-                <span className="text-lg font-semibold bg-gradient-to-r from-emerald-600 to-blue-600 bg-clip-text text-transparent">
+                <Sparkles className="h-5 w-5 text-primary mr-2 animate-spin" />
+                <span className="text-lg font-semibold text-foreground">
                   🧬 AI is analyzing your genome...
                 </span>
               </div>
-              <span className="text-lg font-bold text-emerald-600">
+              <span className="text-lg font-bold text-primary">
                 {processingProgress}%
               </span>
             </div>
             <Progress
               value={processingProgress}
-              className="h-3 bg-gradient-to-r from-emerald-200 to-blue-200"
+              className="h-3"
             />
 
             {/* Fun Facts Display */}
-            <div className="bg-gradient-to-r from-cyan-100 via-teal-100 to-emerald-100 p-4 rounded-xl border-2 border-cyan-200 shadow-md">
+            <div className="bg-muted/50 p-4 rounded-xl border border-border shadow-md">
               <div className="flex items-center mb-2">
-                <Sparkles className="h-5 w-5 text-cyan-600 mr-2" />
-                <span className="font-bold text-cyan-800">
+                <Sparkles className="h-5 w-5 text-primary mr-2" />
+                <span className="font-bold text-foreground">
                   🎓 Did you know?
                 </span>
               </div>
-              <p className="text-sm text-gray-700 font-medium animate-pulse">
+              <p className="text-sm text-muted-foreground font-medium animate-pulse">
                 {currentFact}
               </p>
             </div>
 
-            <p className="text-sm text-gray-600 text-center font-medium">
+            <p className="text-sm text-muted-foreground text-center font-medium">
               ⏱️ This may take a few minutes depending on the genome size
             </p>
           </div>

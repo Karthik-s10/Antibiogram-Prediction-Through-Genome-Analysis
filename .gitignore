@@ -31,4 +31,4 @@ dist-ssr
 core
 
 .github/
-
+venv/
