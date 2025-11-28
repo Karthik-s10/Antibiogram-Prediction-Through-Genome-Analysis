@@ -261,6 +261,30 @@ class QdrantService:
             logger.error(f"Error deleting genome: {e}")
             return False
     
+    def genome_exists(self, genome_id: str) -> bool:
+        """
+        Check if a specific genome already exists in the collection.
+        
+        Args:
+            genome_id: Genome identifier
+            
+        Returns:
+            True if genome exists
+        """
+        if not self.client:
+            return False
+        
+        try:
+            point_id = abs(hash(genome_id)) % (10 ** 12)
+            results = self.client.retrieve(
+                collection_name=self.COLLECTION_NAME,
+                ids=[point_id]
+            )
+            return len(results) > 0
+        except Exception as e:
+            logger.error(f"Failed to check if genome exists: {e}")
+            return False
+    
     def get_collection_stats(self) -> Dict[str, Any]:
         """
         Get statistics about the collection.

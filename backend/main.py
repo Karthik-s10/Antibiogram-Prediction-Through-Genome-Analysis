@@ -7,6 +7,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
+import warnings
+
+# Suppress noisy FutureWarning from transformers / torch._pytree
+warnings.filterwarnings(
+    "ignore",
+    message="`torch.utils._pytree._register_pytree_node` is deprecated.",
+    category=FutureWarning,
+)
 
 from config import settings
 from api import training_routes, prediction_routes, status_routes
