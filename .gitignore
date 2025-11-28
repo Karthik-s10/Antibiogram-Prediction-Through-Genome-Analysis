@@ -35,3 +35,28 @@ core
 venv/
 backend/venv/
 
+# Environment variables (API keys) - CRITICAL SECURITY
+.env
+backend/.env
+*.env
+
+# Data files (Large files, datasets)
+DATA/
+DATA/*
+*.fasta
+*.fna
+*.csv
+*.tsv
+*.txt
+# Exception for documentation/small config files if needed, but generally block data extensions in root
+!requirements.txt
+!README.md
+
+# Cache files
+data_cache/
+__pycache__/
+*.pyc
+
+# Trained models (large files)
+trained_models/
+
