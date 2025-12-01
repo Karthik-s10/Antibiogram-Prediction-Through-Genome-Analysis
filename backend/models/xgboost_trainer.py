@@ -12,6 +12,7 @@ import pickle
 import json
 import os
 import logging
+import time
 
 from config import settings
 
@@ -50,6 +51,8 @@ class XGBoostTrainer:
         self.models: Dict[str, xgb.XGBClassifier] = {}
         self.feature_names: List[str] = []
         self.antibiotic_names: List[str] = []
+        # Per-antibiotic mapping from encoded XGBoost class index -> original S/I/R code (0,1,2)
+        self.label_inv_mappings: Dict[str, Dict[int, int]] = {}
         
         # Detect GPU availability
         self.device = self._detect_gpu()
@@ -184,6 +187,9 @@ class XGBoostTrainer:
         n_antibiotics = len(antibiotic_names)
         metrics = {}
         
+        overall_start = time.time()
+        per_antibiotic_durations = []
+        
         for i, antibiotic in enumerate(antibiotic_names):
             # Check for cancellation before training each antibiotic
             if progress_callback:
@@ -203,7 +209,7 @@ class XGBoostTrainer:
             X_valid = X[valid_mask]
             y_valid = y_antibiotic[valid_mask]
             
-            if len(y_valid) < 10:
+            if len(y_valid) < 5:
                 logger.warning(f"Insufficient data for {antibiotic}: {len(y_valid)} samples. Skipping.")
                 metrics[antibiotic] = {"error": "insufficient_data", "n_samples": len(y_valid)}
                 continue
@@ -217,37 +223,55 @@ class XGBoostTrainer:
                 metrics[antibiotic] = {"error": "single_class", "n_samples": len(y_valid)}
                 continue
             
-            # Train/test split
+            # Encode labels to a contiguous range per antibiotic so XGBoost is happy
+            # For example, if original labels are {0,2}, we map them to {0,1} but
+            # remember how to map predictions back to {0,2}.
+            unique_sorted = np.sort(unique)
+            label_to_enc = {orig: idx for idx, orig in enumerate(unique_sorted)}
+            enc_to_label = {idx: orig for orig, idx in label_to_enc.items()}
+            y_valid_enc = np.array([label_to_enc[v] for v in y_valid], dtype=int)
+            
+            # Train/test split (on encoded labels). If the least populated class
+            # has fewer than 2 samples, sklearn's stratified split will fail,
+            # so we fall back to a non-stratified split in that edge case.
+            unique_enc, counts_enc = np.unique(y_valid_enc, return_counts=True)
+            min_count = counts_enc.min()
+            use_stratify = len(unique_enc) > 1 and min_count >= 2
+            if not use_stratify:
+                logger.warning(
+                    f"Not using stratified split for {antibiotic} because "
+                    f"the least populated class has only {min_count} samples."
+                )
             X_train, X_test, y_train, y_test = train_test_split(
-                X_valid, y_valid,
+                X_valid, y_valid_enc,
                 test_size=0.2,
                 random_state=self.random_state,
-                stratify=y_valid if len(unique) > 1 else None
+                stratify=y_valid_enc if use_stratify else None
             )
             
-            # Train model with GPU support
+            # Train model with GPU support using multi-class softmax on the
+            # per-antibiotic encoded labels. num_class is simply the number of
+            # unique encoded classes for this antibiotic (2 or 3).
+            num_classes = len(unique_sorted)
             model_params = {
                 'max_depth': self.max_depth,
                 'learning_rate': self.learning_rate,
                 'n_estimators': self.n_estimators,
                 'random_state': self.random_state,
                 'objective': 'multi:softmax',
-                'num_class': 3,  # S, I, R
+                'num_class': num_classes,
                 'eval_metric': 'mlogloss',
                 'tree_method': 'hist',  # Fast histogram-based algorithm
             }
-            
-            # Add GPU-specific parameters
+
+            # Add device-specific parameters following XGBoost 2.x recommendations
             if self.device == 'cuda':
-                model_params['tree_method'] = 'gpu_hist'
-                model_params['predictor'] = 'gpu_predictor'
-                model_params['gpu_id'] = 0
-                # Note: XGBoost uses CUDA/HIP backend, works with NVIDIA and AMD GPUs
+                # Use histogram tree method with device='cuda' instead of deprecated gpu_hist
+                model_params['device'] = 'cuda'
                 logger.info("=" * 60)
                 logger.info(f"🚀 TRAINING {antibiotic} MODEL ON GPU (CUDA)")
-                logger.info(f"   Tree method: gpu_hist")
-                logger.info(f"   Predictor: gpu_predictor")
-                logger.info(f"   GPU ID: 0")
+                logger.info(f"   Tree method: hist")
+                logger.info(f"   Device: cuda")
                 try:
                     import torch
                     if torch.cuda.is_available():
@@ -259,35 +283,66 @@ class XGBoostTrainer:
                     pass
                 logger.info("=" * 60)
             else:
+                model_params['device'] = 'cpu'
                 logger.info(f"⚠️  Training {antibiotic} model on CPU (GPU not available or not configured)")
                 logger.info(f"   Tree method: hist (CPU-based)")
+                logger.info(f"   Device: cpu")
                 logger.info(f"   This will be slower than GPU training")
             
             model = xgb.XGBClassifier(**model_params)
-            
-            model.fit(
-                X_train, y_train,
-                eval_set=[(X_test, y_test)],
-                verbose=False
-            )
-            
+
+            ab_start = time.time()
+
+            try:
+                model.fit(
+                    X_train, y_train,
+                    eval_set=[(X_test, y_test)],
+                    verbose=False
+                )
+            except ValueError as e:
+                # XGBoost 2.x can raise a ValueError if it believes the label
+                # classes are invalid (e.g. expecting [0, 1] but seeing [0, 2]).
+                # We already encode labels to a contiguous range per antibiotic,
+                # but in case of any mismatch we skip this antibiotic instead of
+                # failing the entire training job.
+                logger.error(
+                    f"{antibiotic} - XGBoost fit failed with ValueError: {e}"
+                )
+                logger.error(
+                    f"{antibiotic} - raw classes: {unique}, encoded classes: {unique_enc}"
+                )
+                metrics[antibiotic] = {
+                    "error": "fit_error_invalid_classes",
+                    "n_samples": int(len(y_valid)),
+                    "classes": [int(c) for c in unique],
+                    "message": str(e),
+                }
+                # Skip to next antibiotic without aborting the whole job
+                continue
+
+            ab_elapsed = time.time() - ab_start
+            per_antibiotic_durations.append(ab_elapsed)
+
             # Evaluate
-            y_pred = model.predict(X_test)
+            y_pred_enc = model.predict(X_test)
+            # Map encoded predictions and test labels back to original S/I/R codes
+            y_test_orig = np.array([enc_to_label[int(v)] for v in y_test])
+            y_pred = np.array([enc_to_label[int(v)] for v in y_pred_enc])
             
             # Calculate metrics
             antibiotic_metrics = {
                 "n_train": len(X_train),
                 "n_test": len(X_test),
-                "accuracy": float(accuracy_score(y_test, y_pred)),
-                "f1_macro": float(f1_score(y_test, y_pred, average='macro', zero_division=0)),
-                "f1_weighted": float(f1_score(y_test, y_pred, average='weighted', zero_division=0)),
-                "jaccard_macro": float(jaccard_score(y_test, y_pred, average='macro', zero_division=0)),
-                "jaccard_weighted": float(jaccard_score(y_test, y_pred, average='weighted', zero_division=0)),
+                "accuracy": float(accuracy_score(y_test_orig, y_pred)),
+                "f1_macro": float(f1_score(y_test_orig, y_pred, average='macro', zero_division=0)),
+                "f1_weighted": float(f1_score(y_test_orig, y_pred, average='weighted', zero_division=0)),
+                "jaccard_macro": float(jaccard_score(y_test_orig, y_pred, average='macro', zero_division=0)),
+                "jaccard_weighted": float(jaccard_score(y_test_orig, y_pred, average='weighted', zero_division=0)),
             }
             
             # Get per-class metrics
             try:
-                report = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
+                report = classification_report(y_test_orig, y_pred, output_dict=True, zero_division=0)
                 antibiotic_metrics["per_class"] = report
             except:
                 pass
@@ -305,15 +360,36 @@ class XGBoostTrainer:
             
             metrics[antibiotic] = antibiotic_metrics
             self.models[antibiotic] = model
+            # Remember label mapping for this antibiotic (encoded -> original S/I/R code)
+            self.label_inv_mappings[antibiotic] = enc_to_label
             
-            logger.info(f"{antibiotic} - Accuracy: {antibiotic_metrics['accuracy']:.3f}, "
-                       f"F1: {antibiotic_metrics['f1_macro']:.3f}, "
-                       f"Jaccard: {antibiotic_metrics['jaccard_macro']:.3f}")
-            
+            logger.info(
+                f"{antibiotic} - Accuracy: {antibiotic_metrics['accuracy']:.3f}, "
+                f"F1: {antibiotic_metrics['f1_macro']:.3f}, "
+                f"Jaccard: {antibiotic_metrics['jaccard_macro']:.3f}"
+            )
+
+            done = i + 1
+            remaining = n_antibiotics - done
+            avg_time = sum(per_antibiotic_durations) / max(len(per_antibiotic_durations), 1)
+            eta_sec = remaining * avg_time
+            total_elapsed = time.time() - overall_start
+
+            logger.info(
+                f"[{done}/{n_antibiotics}] {antibiotic} trained in {ab_elapsed/60:.1f} min; "
+                f"remaining {remaining}, ETA {eta_sec/60:.1f} min "
+                f"(elapsed {total_elapsed/60:.1f} min)"
+            )
+
             # Update progress
             if progress_callback:
                 progress = int((i + 1) / n_antibiotics * 80) + 10  # 10-90% range
-                progress_callback(progress, f"Trained model for {antibiotic}")
+                msg = (
+                    f"{antibiotic} trained in {ab_elapsed/60:.1f} min; "
+                    f"{done}/{n_antibiotics} antibiotics trained; "
+                    f"ETA {eta_sec/60:.1f} min"
+                )
+                progress_callback(progress, msg)
         
         return metrics
     
@@ -329,26 +405,39 @@ class XGBoostTrainer:
             Path to the main model file
         """
         os.makedirs(model_dir, exist_ok=True)
-        
-        model_path = os.path.join(model_dir, f"{model_name}.pkl")
-        metadata_path = os.path.join(model_dir, f"{model_name}_metadata.json")
-        
-        # Save all models as a dict
+
+        # If a subdirectory for this model already exists (e.g. imported demos),
+        # save into that folder using model.pkl + metadata.json. Otherwise, keep
+        # the existing flat file layout.
+        model_subdir = os.path.join(model_dir, model_name)
+        if os.path.isdir(model_subdir):
+            target_dir = model_subdir
+            model_path = os.path.join(target_dir, "model.pkl")
+            metadata_path = os.path.join(target_dir, "metadata.json")
+        else:
+            target_dir = model_dir
+            model_path = os.path.join(target_dir, f"{model_name}.pkl")
+            metadata_path = os.path.join(target_dir, f"{model_name}_metadata.json")
+
+        os.makedirs(target_dir, exist_ok=True)
+
+        # Save all models as a dict (overwrite existing binary if present)
         save_dict = {
             'models': self.models,
             'feature_names': self.feature_names,
             'antibiotic_names': self.antibiotic_names,
+            'label_inv_mappings': self.label_inv_mappings,
             'hyperparameters': {
                 'max_depth': self.max_depth,
                 'learning_rate': self.learning_rate,
                 'n_estimators': self.n_estimators
             }
         }
-        
+
         with open(model_path, 'wb') as f:
             pickle.dump(save_dict, f)
-        
-        # Save metadata
+
+        # Build new metadata
         metadata = {
             'model_name': model_name,
             'model_type': 'xgboost',
@@ -357,12 +446,25 @@ class XGBoostTrainer:
             'antibiotic_names': self.antibiotic_names,
             'hyperparameters': save_dict['hyperparameters']
         }
-        
+
+        # If an existing metadata.json is present (e.g. imported demo), merge it
+        # by appending/updating keys instead of discarding the old structure.
+        if os.path.exists(metadata_path):
+            try:
+                with open(metadata_path, 'r') as f:
+                    existing = json.load(f)
+                if isinstance(existing, dict):
+                    merged = existing.copy()
+                    merged.update(metadata)
+                    metadata = merged
+            except Exception as e:
+                logger.warning(f"Failed to merge existing XGBoost metadata at {metadata_path}: {e}")
+
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
-        
+
         logger.info(f"Saved XGBoost models to {model_path}")
-        
+
         return model_path
     
     @classmethod
@@ -383,6 +485,7 @@ class XGBoostTrainer:
         trainer.models = save_dict['models']
         trainer.feature_names = save_dict['feature_names']
         trainer.antibiotic_names = save_dict['antibiotic_names']
+        trainer.label_inv_mappings = save_dict.get('label_inv_mappings', {})
         trainer.max_depth = save_dict['hyperparameters']['max_depth']
         trainer.learning_rate = save_dict['hyperparameters']['learning_rate']
         trainer.n_estimators = save_dict['hyperparameters']['n_estimators']
@@ -406,7 +509,13 @@ class XGBoostTrainer:
         
         predictions = {}
         for antibiotic, model in self.models.items():
-            pred = model.predict(X)[0]
+            pred_enc = model.predict(X)[0]
+            # Map encoded prediction back to original label if mapping exists
+            enc_to_label = self.label_inv_mappings.get(antibiotic)
+            if enc_to_label is not None:
+                pred = enc_to_label.get(int(pred_enc), int(pred_enc))
+            else:
+                pred = int(pred_enc)
             predictions[antibiotic] = int(pred)
         
         return predictions
@@ -426,7 +535,19 @@ class XGBoostTrainer:
         
         probabilities = {}
         for antibiotic, model in self.models.items():
-            proba = model.predict_proba(X)[0]
+            proba_raw = model.predict_proba(X)[0]
+            enc_to_label = self.label_inv_mappings.get(antibiotic)
+            if enc_to_label is not None:
+                # Expand encoded probabilities into a 3-element [P(S), P(I), P(R)] vector
+                proba3 = np.zeros(3, dtype=float)
+                n_classes = proba_raw.shape[0]
+                for enc_idx, orig_label in enc_to_label.items():
+                    if 0 <= enc_idx < n_classes and 0 <= orig_label < 3:
+                        proba3[orig_label] = proba_raw[enc_idx]
+                proba = proba3
+            else:
+                # Assume proba_raw already aligns with [0,1,2]
+                proba = proba_raw
             probabilities[antibiotic] = proba
         
         return probabilities

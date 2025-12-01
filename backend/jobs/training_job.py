@@ -6,15 +6,40 @@ import logging
 import traceback
 from typing import Optional
 import numpy as np
+from pathlib import Path
+import shutil
+import json
 
 from jobs.job_manager import JobManager, JobStatus
 from preprocessing.kmer_processor import KmerProcessor
 from preprocessing.phenotype_parser import PhenotypeParser
+from preprocessing.data_preprocessor import DataPreprocessor
 from models.xgboost_trainer import XGBoostTrainer
 from services.qdrant_service import QdrantService
+from services.embedding_service import EmbeddingService
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _cleanup_uploaded_files(job_id: str, phenotype_path: Optional[str], kmer_path: Optional[str] = None, rosetta_path: Optional[str] = None) -> None:
+    """Remove temporary uploaded_data directories created for this job, if any.
+
+    Only directories under backend/uploaded_data whose name matches this job_id
+    are removed; shared/global resources like BVBRC_genome.txt in other
+    locations are left untouched.
+    """
+    try:
+        candidate_paths = [p for p in [phenotype_path, kmer_path, rosetta_path] if p]
+        if not candidate_paths:
+            return
+
+        parent_dirs = {Path(p).parent for p in candidate_paths}
+        for parent in parent_dirs:
+            if "uploaded_data" in parent.parts and parent.name == job_id:
+                shutil.rmtree(parent, ignore_errors=True)
+    except Exception as e:
+        logger.warning(f"Failed to cleanup uploaded_data files: {e}")
 
 
 def _generate_embeddings_from_features(feature_matrix: np.ndarray, target_dim: int = 768) -> np.ndarray:
@@ -106,7 +131,13 @@ def train_xgboost_job(
     learning_rate: float,
     n_estimators: int,
     k: int,
-    job_manager: JobManager
+    job_manager: JobManager,
+    use_rosetta_preprocessor: bool = False,
+    phenotype_path: Optional[str] = None,
+    kmer_path: Optional[str] = None,
+    rosetta_path: Optional[str] = None,
+    max_genomes: int = 1000,
+    cycle_index: int = 0,
 ):
     """
     Execute XGBoost training as a background job.
@@ -122,6 +153,8 @@ def train_xgboost_job(
         job_manager: JobManager instance for status updates
     """
     try:
+        kmer_processor = None
+        preprocessor: Optional[DataPreprocessor] = None
         # Update status to running
         job_manager.update_job(
             job_id,
@@ -129,59 +162,138 @@ def train_xgboost_job(
             progress=0,
             current_step="Starting XGBoost training pipeline..."
         )
+        assembly_metadata = {}
         
-        # Step 1: Parse k-mer data
-        logger.info(f"[{job_id}] Parsing k-mer data with k={k}...")
-        job_manager.update_job(
-            job_id,
-            progress=5,
-            current_step=f"Parsing k-mer data (k={k})..."
+        # Step 1: Data preprocessing / alignment
+        if use_rosetta_preprocessor and phenotype_path and kmer_path and rosetta_path:
+            # Use BV-BRC Rosetta-based preprocessing via DataPreprocessor
+            logger.info(f"[{job_id}] Using Rosetta-based DataPreprocessor pipeline")
+            job_manager.update_job(
+                job_id,
+                progress=5,
+                current_step="Initializing Rosetta-based data preprocessor...",
+            )
+
+            preprocessor = DataPreprocessor(rosetta_file=rosetta_path)
+
+            job_manager.update_job(
+                job_id,
+                progress=10,
+                current_step=(
+                    "Running BV-BRC preprocessing (ID mapping + k-mer/phenotype alignment)..."
+                ),
+            )
+
+            X_df, Y_df = preprocessor.preprocess_data(
+                phenotype_file=phenotype_path,
+                kmer_file=kmer_path,
+                use_cache=False,
+                save_cache=True,
+            )
+
+            job_manager.update_job(
+                job_id,
+                progress=20,
+                current_step=(
+                    f"Data aligned (Rosetta): {len(X_df)} genomes, "
+                    f"{X_df.shape[1]} features, {Y_df.shape[1]} antibiotics"
+                ),
+            )
+
+            # Convert to numpy arrays for trainer
+            aligned_genome_ids = list(X_df.index)
+            feature_names = [str(c) for c in X_df.columns]
+            antibiotic_names = [str(c) for c in Y_df.columns]
+
+            X_aligned = X_df.to_numpy(dtype=np.float32)
+            Y_values = Y_df.to_numpy()
+            # Convert NaN to -1 to match PhenotypeParser semantics
+            y = np.where(np.isnan(Y_values), -1, Y_values).astype(np.int8)
+        else:
+            # Fallback: use in-memory KmerProcessor + PhenotypeParser pipeline
+            logger.info(f"[{job_id}] Using in-memory k-mer/phenotype pipeline")
+            # Step 1: Parse k-mer data
+            logger.info(f"[{job_id}] Parsing k-mer data with k={k}...")
+            job_manager.update_job(
+                job_id,
+                progress=5,
+                current_step=f"Parsing k-mer data (k={k})...",
+            )
+
+            kmer_processor = KmerProcessor(k=k)
+            kmer_df = kmer_processor.parse_kmer_file(kmer_content)
+
+            # Step 2: Build feature matrix
+            logger.info(f"[{job_id}] Building feature matrix...")
+            job_manager.update_job(
+                job_id,
+                progress=10,
+                current_step="Building feature matrix...",
+            )
+
+            X, feature_genome_ids, feature_names = kmer_processor.build_feature_matrix(kmer_df)
+
+            # Step 3: Parse phenotype data
+            logger.info(f"[{job_id}] Parsing phenotype data...")
+            job_manager.update_job(
+                job_id,
+                progress=15,
+                current_step="Parsing phenotype data...",
+            )
+
+            phenotype_parser = PhenotypeParser()
+            phenotype_df = phenotype_parser.parse_phenotype_file(phenotype_content)
+
+            # Step 4: Align data
+            logger.info(f"[{job_id}] Aligning feature and label data...")
+            job_manager.update_job(
+                job_id,
+                progress=20,
+                current_step="Aligning feature and label matrices...",
+            )
+
+            aligned_genome_ids, y, antibiotic_names = phenotype_parser.align_data(
+                feature_genome_ids,
+                phenotype_df,
+            )
+
+            # Filter X to only include aligned genomes
+            genome_id_to_idx = {gid: i for i, gid in enumerate(feature_genome_ids)}
+            aligned_indices = [genome_id_to_idx[gid] for gid in aligned_genome_ids]
+            X_aligned = X[aligned_indices]
+        
+        logger.info(
+            f"[{job_id}] Training data: {X_aligned.shape[0]} genomes, "
+            f"{X_aligned.shape[1]} features, {len(antibiotic_names)} antibiotics",
         )
         
-        kmer_processor = KmerProcessor(k=k)
-        kmer_df = kmer_processor.parse_kmer_file(kmer_content)
-        
-        # Step 2: Build feature matrix
-        logger.info(f"[{job_id}] Building feature matrix...")
-        job_manager.update_job(
-            job_id,
-            progress=10,
-            current_step="Building feature matrix..."
-        )
-        
-        X, feature_genome_ids, feature_names = kmer_processor.build_feature_matrix(kmer_df)
-        
-        # Step 3: Parse phenotype data
-        logger.info(f"[{job_id}] Parsing phenotype data...")
-        job_manager.update_job(
-            job_id,
-            progress=15,
-            current_step="Parsing phenotype data..."
-        )
-        
-        phenotype_parser = PhenotypeParser()
-        phenotype_df = phenotype_parser.parse_phenotype_file(phenotype_content)
-        
-        # Step 4: Align data
-        logger.info(f"[{job_id}] Aligning feature and label data...")
-        job_manager.update_job(
-            job_id,
-            progress=20,
-            current_step="Aligning feature and label matrices..."
-        )
-        
-        aligned_genome_ids, y, antibiotic_names = phenotype_parser.align_data(
-            feature_genome_ids,
-            phenotype_df
-        )
-        
-        # Filter X to only include aligned genomes
-        genome_id_to_idx = {gid: i for i, gid in enumerate(feature_genome_ids)}
-        aligned_indices = [genome_id_to_idx[gid] for gid in aligned_genome_ids]
-        X_aligned = X[aligned_indices]
-        
-        logger.info(f"[{job_id}] Training data: {X_aligned.shape[0]} genomes, "
-                   f"{X_aligned.shape[1]} features, {len(antibiotic_names)} antibiotics")
+        # Apply max_genomes/cycle_index limit to create deterministic chunks
+        original_genome_count = X_aligned.shape[0]
+        if max_genomes and original_genome_count > max_genomes:
+            start = cycle_index * max_genomes
+            end = min(start + max_genomes, original_genome_count)
+            if start >= original_genome_count:
+                raise ValueError(
+                    f"cycle_index {cycle_index} is out of range for {original_genome_count} genomes "
+                    f"with max_genomes={max_genomes}"
+                )
+            logger.info(
+                f"[{job_id}] Using genomes [{start}:{end}] out of {original_genome_count} "
+                f"(chunk size {max_genomes}, cycle_index={cycle_index})"
+            )
+            job_manager.update_job(
+                job_id,
+                progress=21,
+                current_step=(
+                    f"Training on genomes {start}–{end - 1} out of {original_genome_count} "
+                    f"(chunk {cycle_index}, size {max_genomes})"
+                ),
+            )
+            idx = np.arange(start, end)
+            X_aligned = X_aligned[idx]
+            y = y[idx]
+            aligned_genome_ids = [aligned_genome_ids[i] for i in idx]
+            logger.info(f"[{job_id}] Chunk contains {len(aligned_genome_ids)} genomes for training")
         
         # Step 4.5: Store embeddings in Qdrant for similarity search
         logger.info(f"[{job_id}] Storing genome embeddings in Qdrant...")
@@ -195,9 +307,15 @@ def train_xgboost_job(
             if qdrant_service.client:
                 # Generate embeddings from feature vectors using PCA to reduce to 768 dimensions
                 embeddings = _generate_embeddings_from_features(X_aligned, target_dim=768)
-                
+
                 # Prepare metadata for each genome
                 metadata_list = []
+                assembly_metadata = {}
+                try:
+                    if use_rosetta_preprocessor and preprocessor is not None:
+                        assembly_metadata = getattr(preprocessor, "assembly_metadata", {}) or {}
+                except Exception as e:
+                    logger.warning(f"[{job_id}] Failed to load assembly metadata for Qdrant: {e}")
                 for genome_idx, genome_id in enumerate(aligned_genome_ids):
                     # Get resistance profile for this genome
                     resistance_profile = {}
@@ -206,22 +324,57 @@ def train_xgboost_job(
                         if label != -1:  # Only include if label exists
                             resistance_map = {0: 'S', 1: 'I', 2: 'R'}
                             resistance_profile[antibiotic] = resistance_map.get(label, 'Unknown')
-                    
+
+                    extra_meta = assembly_metadata.get(genome_id, {}) if assembly_metadata else {}
+                    species_name = extra_meta.get('organism_name') or extra_meta.get('genome_name')
+                    strain = extra_meta.get('strain')
+
                     metadata_list.append({
                         'model_name': model_name,
                         'model_type': 'xgboost',
                         'k': k,
                         'resistance_profile': resistance_profile,
-                        'n_antibiotics': len(antibiotic_names)
+                        'n_antibiotics': len(antibiotic_names),
+                        'species': species_name,
+                        'organism_name': extra_meta.get('organism_name'),
+                        'genome_name': extra_meta.get('genome_name'),
+                        'strain': strain,
                     })
-                
-                # Batch insert embeddings
-                inserted_count = qdrant_service.batch_insert_embeddings(
-                    genome_ids=aligned_genome_ids,
-                    embeddings=embeddings,
-                    metadata_list=metadata_list
-                )
-                logger.info(f"[{job_id}] ✅ Stored {inserted_count} genome embeddings in Qdrant")
+
+                # Filter out genomes that already have embeddings stored in Qdrant
+                genomes_to_insert = []
+                embeddings_to_insert = []
+                metadata_to_insert = []
+                skipped_existing = 0
+
+                for genome_idx, genome_id in enumerate(aligned_genome_ids):
+                    try:
+                        if qdrant_service.genome_exists(genome_id):
+                            skipped_existing += 1
+                            continue
+                    except Exception as e:
+                        logger.warning(f"[{job_id}] Failed to check existing genome in Qdrant ({genome_id}): {e}")
+                        # If existence check fails, fall back to inserting to avoid losing data
+                    genomes_to_insert.append(genome_id)
+                    embeddings_to_insert.append(embeddings[genome_idx])
+                    metadata_to_insert.append(metadata_list[genome_idx])
+
+                if genomes_to_insert:
+                    embeddings_array = np.vstack(embeddings_to_insert).astype(np.float32)
+                    inserted_count = qdrant_service.batch_insert_embeddings(
+                        genome_ids=genomes_to_insert,
+                        embeddings=embeddings_array,
+                        metadata_list=metadata_to_insert,
+                    )
+                    logger.info(
+                        f"[{job_id}] ✅ Stored {inserted_count} new genome embeddings in Qdrant "
+                        f"(skipped {skipped_existing} existing)"
+                    )
+                else:
+                    logger.info(
+                        f"[{job_id}] All {len(aligned_genome_ids)} genomes already have embeddings in Qdrant; "
+                        f"skipping upsert."
+                    )
             else:
                 logger.warning(f"[{job_id}] ⚠️  Qdrant not available, skipping embedding storage")
         except Exception as e:
@@ -293,10 +446,42 @@ def train_xgboost_job(
         )
         
         model_path = trainer.save_models(settings.model_storage_path, model_name)
+
+        # Export explainability report with top k-mer features per antibiotic
+        try:
+            explain_data = {
+                "model_type": "xgboost",
+                "model_name": model_name,
+                "model_path": model_path,
+                "n_genomes": int(X_aligned.shape[0]),
+                "n_features": int(X_aligned.shape[1]),
+                "n_antibiotics": int(len(antibiotic_names)),
+                "antibiotics": {},
+            }
+
+            for ab_name, ab_metrics in metrics.items():
+                if "error" in ab_metrics:
+                    continue
+                top_features = ab_metrics.get("top_features", [])
+                explain_data["antibiotics"][ab_name] = {
+                    "top_features": top_features,
+                }
+
+            explain_path = Path(model_path).with_name(
+                Path(model_path).stem + "_explainability.json"
+            )
+            with open(explain_path, "w") as f:
+                json.dump(explain_data, f, indent=2)
+            logger.info(f"[{job_id}] Saved XGBoost explainability report to {explain_path}")
+        except Exception as e:
+            logger.warning(f"[{job_id}] Failed to save XGBoost explainability report: {e}")
         
         # Save feature info
-        feature_info_path = f"{settings.model_storage_path}/{model_name}_features.json"
-        kmer_processor.save_feature_info(feature_info_path)
+        if kmer_processor is not None:
+            feature_info_path = f"{settings.model_storage_path}/{model_name}_features.json"
+            kmer_processor.save_feature_info(feature_info_path)
+        else:
+            logger.info(f"[{job_id}] Skipping feature info save (no k-mer processor available)")
         
         # Step 7: Calculate summary metrics
         logger.info(f"[{job_id}] Computing summary metrics...")
@@ -345,6 +530,8 @@ def train_xgboost_job(
             status=JobStatus.FAILED,
             error=error_msg
         )
+    finally:
+        _cleanup_uploaded_files(job_id, phenotype_path, kmer_path, rosetta_path)
 
 
 def train_transformer_job(
@@ -356,7 +543,12 @@ def train_transformer_job(
     batch_size: int,
     learning_rate: float,
     k: int,
-    job_manager: JobManager
+    job_manager: JobManager,
+    use_rosetta_preprocessor: bool = False,
+    phenotype_path: Optional[str] = None,
+    rosetta_path: Optional[str] = None,
+    max_genomes: int = 1000,
+    cycle_index: int = 0,
 ):
     """
     Execute Transformer (DNABERT) training as a background job.
@@ -413,17 +605,44 @@ def train_transformer_job(
         processor = DNABERTProcessor(k=k, max_length=512)
         genome_to_genes = processor.parse_gene_sequences_from_kmer(kmer_content)
         
-        # Step 2: Parse phenotype data
+        # Step 2: Parse phenotype data, optionally using Rosetta-based ID mapping
         logger.info(f"[{job_id}] Parsing phenotype data...")
         job_manager.update_job(
             job_id,
             progress=15,
             current_step="Parsing phenotype data..."
         )
-        
-        from preprocessing.phenotype_parser import PhenotypeParser
-        phenotype_parser = PhenotypeParser()
-        phenotype_df = phenotype_parser.parse_phenotype_file(phenotype_content)
+
+        if use_rosetta_preprocessor and phenotype_path and rosetta_path:
+            logger.info(f"[{job_id}] Using Rosetta-based DataPreprocessor for phenotype ID mapping")
+            job_manager.update_job(
+                job_id,
+                progress=18,
+                current_step="Mapping phenotype Genome IDs to GenBank Accessions via Rosetta file...",
+            )
+
+            preprocessor = DataPreprocessor(rosetta_file=rosetta_path)
+            id_mapping = preprocessor.load_id_mapping()
+            mapped_pheno_df = preprocessor.load_and_map_phenotypes(phenotype_path, id_mapping)
+
+            # Build phenotype DataFrame compatible with DNABERTProcessor.create_gene_dataset,
+            # using Assembly Accession (GenBank) as genome_id to match k-mer genomes.
+            phenotype_df = mapped_pheno_df[["Assembly Accession", "Antibiotic", "Resistant Phenotype"]].copy()
+            try:
+                assembly_metadata = getattr(preprocessor, "assembly_metadata", {}) or {}
+            except Exception as e:
+                logger.warning(f"[{job_id}] Failed to load assembly metadata for Transformer Qdrant storage: {e}")
+            phenotype_df = phenotype_df.rename(
+                columns={
+                    "Assembly Accession": "genome_id",
+                    "Antibiotic": "antibiotic",
+                    "Resistant Phenotype": "phenotype",
+                }
+            )
+        else:
+            from preprocessing.phenotype_parser import PhenotypeParser
+            phenotype_parser = PhenotypeParser()
+            phenotype_df = phenotype_parser.parse_phenotype_file(phenotype_content)
         
         # Step 3: Create gene-level dataset
         logger.info(f"[{job_id}] Creating gene-level dataset...")
@@ -438,10 +657,41 @@ def train_transformer_job(
         if len(gene_df) < 100:
             raise ValueError(f"Insufficient gene data: {len(gene_df)} genes. Need at least 100.")
         
-        logger.info(f"[{job_id}] Gene dataset: {len(gene_df)} genes from {gene_df['genome_id'].nunique()} genomes")
+        original_genome_count = gene_df['genome_id'].nunique()
+        logger.info(f"[{job_id}] Gene dataset: {len(gene_df)} genes from {original_genome_count} genomes")
+        
+        # Apply max_genomes/cycle_index limit to create deterministic chunks
+        if max_genomes and original_genome_count > max_genomes:
+            unique_genome_ids = sorted(gene_df['genome_id'].unique().tolist())
+            total = len(unique_genome_ids)
+            start = cycle_index * max_genomes
+            end = min(start + max_genomes, total)
+            if start >= total:
+                raise ValueError(
+                    f"cycle_index {cycle_index} is out of range for {total} genomes "
+                    f"with max_genomes={max_genomes}"
+                )
+            logger.info(
+                f"[{job_id}] Using genome IDs [{start}:{end}] out of {total} "
+                f"(chunk size {max_genomes}, cycle_index={cycle_index})"
+            )
+            job_manager.update_job(
+                job_id,
+                progress=26,
+                current_step=(
+                    f"Training on genomes {start}–{end - 1} out of {total} "
+                    f"(chunk {cycle_index}, size {max_genomes})"
+                ),
+            )
+            selected_ids = set(unique_genome_ids[start:end])
+            gene_df = gene_df[gene_df['genome_id'].isin(selected_ids)]
+            logger.info(
+                f"[{job_id}] Chunk contains {gene_df['genome_id'].nunique()} genomes "
+                f"({len(gene_df)} genes) for training"
+            )
         
         # Step 3.5: Store embeddings in Qdrant for similarity search
-        # For DNABERT, we need to build feature vectors from k-mer data
+        # For DNABERT, we generate 768-dim embeddings directly from genome DNA sequences
         logger.info(f"[{job_id}] Storing genome embeddings in Qdrant...")
         job_manager.update_job(
             job_id,
@@ -451,49 +701,91 @@ def train_transformer_job(
         try:
             qdrant_service = QdrantService()
             if qdrant_service.client:
-                # Build feature matrix from k-mer data for embeddings
-                kmer_processor = KmerProcessor(k=k)
-                kmer_df = kmer_processor.parse_kmer_file(kmer_content)
-                X, feature_genome_ids, _ = kmer_processor.build_feature_matrix(kmer_df)
-                
-                # Align with genomes that have phenotype data
+                # Use DNABERT-based embedding service on CPU to avoid GPU contention
+                embedding_service = EmbeddingService(device="cpu")
+
+                # Align with genomes that have phenotype data (using same genome_id convention as gene_df)
                 unique_genome_ids = gene_df['genome_id'].unique().tolist()
-                genome_id_to_idx = {gid: i for i, gid in enumerate(feature_genome_ids)}
-                aligned_indices = [genome_id_to_idx[gid] for gid in unique_genome_ids if gid in genome_id_to_idx]
-                aligned_genome_ids = [gid for gid in unique_genome_ids if gid in genome_id_to_idx]
-                X_aligned = X[aligned_indices] if aligned_indices else np.array([]).reshape(0, X.shape[1])
-                
-                if len(X_aligned) > 0:
-                    # Generate embeddings from feature vectors
-                    embeddings = _generate_embeddings_from_features(X_aligned, target_dim=768)
-                    
-                    # Prepare metadata for each genome
-                    metadata_list = []
-                    for genome_id in aligned_genome_ids:
-                        # Get resistance profile for this genome
-                        genome_phenotypes = phenotype_df[phenotype_df['genome_id'] == genome_id]
-                        resistance_profile = {}
-                        for _, row in genome_phenotypes.iterrows():
-                            antibiotic = row.get('antibiotic', '')
-                            phenotype = row.get('phenotype', '')
-                            if antibiotic and phenotype:
-                                resistance_profile[antibiotic] = phenotype
-                        
-                        metadata_list.append({
-                            'model_name': model_name,
-                            'model_type': 'transformer_dnabert',
-                            'k': k,
-                            'resistance_profile': resistance_profile,
-                            'n_genes': len(gene_df[gene_df['genome_id'] == genome_id])
-                        })
-                    
-                    # Batch insert embeddings
-                    inserted_count = qdrant_service.batch_insert_embeddings(
-                        genome_ids=aligned_genome_ids,
-                        embeddings=embeddings,
-                        metadata_list=metadata_list
-                    )
-                    logger.info(f"[{job_id}] ✅ Stored {inserted_count} genome embeddings in Qdrant")
+
+                aligned_genome_ids = []
+                full_sequences = []
+                metadata_list = []
+
+                # Build full genome sequences and metadata first
+                for genome_id in unique_genome_ids:
+                    genes_for_genome = genome_to_genes.get(genome_id)
+                    if not genes_for_genome:
+                        continue
+
+                    # Reconstruct a representative genome sequence from its genes
+                    full_sequence = ''.join(genes_for_genome)
+
+                    aligned_genome_ids.append(genome_id)
+                    full_sequences.append(full_sequence)
+
+                    # Build resistance profile metadata for this genome
+                    genome_phenotypes = phenotype_df[phenotype_df['genome_id'] == genome_id]
+                    resistance_profile = {}
+                    for _, row in genome_phenotypes.iterrows():
+                        antibiotic = row.get('antibiotic', '')
+                        phenotype = row.get('phenotype', '')
+                        if antibiotic and phenotype:
+                            resistance_profile[antibiotic] = phenotype
+
+                    extra_meta = assembly_metadata.get(genome_id, {}) if assembly_metadata else {}
+                    species_name = extra_meta.get('organism_name') or extra_meta.get('genome_name')
+                    strain = extra_meta.get('strain')
+
+                    metadata_list.append({
+                        'model_name': model_name,
+                        'model_type': 'transformer_dnabert',
+                        'k': k,
+                        'resistance_profile': resistance_profile,
+                        'n_genes': len(gene_df[gene_df['genome_id'] == genome_id]),
+                        'species': species_name,
+                        'organism_name': extra_meta.get('organism_name'),
+                        'genome_name': extra_meta.get('genome_name'),
+                        'strain': strain,
+                    })
+
+                if aligned_genome_ids:
+                    # Batch-embed all genome sequences for this chunk on CPU using DNABERT
+                    embeddings_list = embedding_service.embed_sequences(full_sequences, batch_size=8)
+                    embeddings = [np.array(vec, dtype=np.float32) for vec in embeddings_list]
+                    # Filter out genomes that already have embeddings stored in Qdrant
+                    genomes_to_insert = []
+                    embeddings_to_insert = []
+                    metadata_to_insert = []
+                    skipped_existing = 0
+
+                    for idx, genome_id in enumerate(aligned_genome_ids):
+                        try:
+                            if qdrant_service.genome_exists(genome_id):
+                                skipped_existing += 1
+                                continue
+                        except Exception as e:
+                            logger.warning(f"[{job_id}] Failed to check existing genome in Qdrant ({genome_id}): {e}")
+                            # If existence check fails, fall back to inserting to avoid losing data
+                        genomes_to_insert.append(genome_id)
+                        embeddings_to_insert.append(embeddings[idx])
+                        metadata_to_insert.append(metadata_list[idx])
+
+                    if genomes_to_insert:
+                        embeddings_array = np.vstack(embeddings_to_insert).astype(np.float32)
+                        inserted_count = qdrant_service.batch_insert_embeddings(
+                            genome_ids=genomes_to_insert,
+                            embeddings=embeddings_array,
+                            metadata_list=metadata_to_insert,
+                        )
+                        logger.info(
+                            f"[{job_id}] ✅ Stored {inserted_count} new genome embeddings in Qdrant "
+                            f"(skipped {skipped_existing} existing)"
+                        )
+                    else:
+                        logger.info(
+                            f"[{job_id}] All {len(aligned_genome_ids)} genomes already have embeddings in Qdrant; "
+                            f"skipping upsert."
+                        )
                 else:
                     logger.warning(f"[{job_id}] No aligned genomes found for Qdrant storage")
             else:
@@ -524,12 +816,20 @@ def train_transformer_job(
             job_manager.update_job(job_id, progress=progress, current_step=message)
         
         logger.info(f"[{job_id}] Initializing DNABERT Transformer trainer with GPU support...")
+
+        # Use DNABERT v1 6-mer backbone for training.
+        # We still parse the k-mer TSV with its original k (e.g., 10) to reconstruct genes,
+        # but tokenization for the Transformer always uses 6-mers.
+        base_model = "zhihan1996/DNA_bert_6"
+        token_k = 6
+
         trainer = DNABERTTrainer(
-            model_name="zhihan1996/DNABERT-6",
+            model_name=base_model,
             max_length=512,
             batch_size=batch_size,
             epochs=epochs,
-            learning_rate=learning_rate
+            learning_rate=learning_rate,
+            kmer_size=token_k,
         )
         if trainer.device.type == 'cuda':
             logger.info(f"[{job_id}] ✅ DNABERT Transformer will use GPU for training")
@@ -591,7 +891,7 @@ def train_transformer_job(
                 'epochs': epochs,
                 'batch_size': batch_size,
                 'learning_rate': learning_rate,
-                'base_model': 'DNABERT-6'
+                'base_model': base_model,
             }
         }
         
@@ -613,6 +913,8 @@ def train_transformer_job(
             status=JobStatus.FAILED,
             error=error_msg
         )
+    finally:
+        _cleanup_uploaded_files(job_id, phenotype_path, None, rosetta_path)
 
 
 def train_parallel_job(
@@ -630,7 +932,13 @@ def train_parallel_job(
     transformer_batch_size: int,
     transformer_learning_rate: float,
     k: int,
-    job_manager: JobManager
+    job_manager: JobManager,
+    use_rosetta_preprocessor: bool = False,
+    phenotype_path: Optional[str] = None,
+    kmer_path: Optional[str] = None,
+    rosetta_path: Optional[str] = None,
+    max_genomes: int = 1000,
+    cycle_index: int = 0,
 ):
     """
     Execute XGBoost and Transformer training in parallel using threading.
@@ -674,8 +982,9 @@ def train_parallel_job(
             metadata={
                 "model_name": xgb_model_name,
                 "parent_job_id": parent_job_id,
-                "k": k
-            }
+                "k": k,
+                "use_rosetta_preprocessor": bool(use_rosetta_preprocessor),
+            },
         )
         
         job_manager.create_job(
@@ -700,8 +1009,14 @@ def train_parallel_job(
                 xgb_learning_rate,
                 xgb_n_estimators,
                 k,
-                job_manager
-            )
+                job_manager,
+                use_rosetta_preprocessor,
+                phenotype_path,
+                kmer_path,
+                rosetta_path,
+                max_genomes,
+                cycle_index,
+            ),
         )
         
         transformer_thread = threading.Thread(
@@ -715,7 +1030,12 @@ def train_parallel_job(
                 transformer_batch_size,
                 transformer_learning_rate,
                 k,
-                job_manager
+                job_manager,
+                use_rosetta_preprocessor,
+                phenotype_path,
+                rosetta_path,
+                max_genomes,
+                cycle_index,
             )
         )
         
@@ -786,4 +1106,7 @@ def train_parallel_job(
             status=JobStatus.FAILED,
             error=error_msg
         )
+    finally:
+        # Clean up parent-level uploaded_data directory (files were stored under parent_job_id)
+        _cleanup_uploaded_files(parent_job_id, phenotype_path, kmer_path, rosetta_path)
 

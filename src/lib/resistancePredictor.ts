@@ -10,6 +10,11 @@ export interface PredictionResult {
   confidence: number;
   markers: GeneticMarker[];
   reasoning: string;
+  classProbabilities?: {
+    S: number;
+    I: number;
+    R: number;
+  };
 }
 
 export interface GeneticMarker {

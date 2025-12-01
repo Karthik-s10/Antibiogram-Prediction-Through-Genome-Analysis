@@ -24,11 +24,14 @@ class DNABERTProcessor:
         Initialize DNABERT processor.
         
         Args:
-            k: K-mer size (must be 6 for DNABERT-6)
+            k: K-mer size
             max_length: Maximum sequence length for DNABERT (512 tokens)
         """
-        if k != 6:
-            logger.warning(f"DNABERT is pre-trained on k=6. Using k={k} may not work well.")
+        if k not in (6, 10):
+            logger.warning(
+                f"DNABERT models are typically pre-trained on k=6 or k=10. "
+                f"Using k={k} may not work well."
+            )
         
         self.k = k
         self.max_length = max_length

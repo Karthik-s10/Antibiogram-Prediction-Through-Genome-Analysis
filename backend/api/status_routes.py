@@ -52,18 +52,29 @@ async def list_all_jobs():
         List of all jobs with their current status
     """
     jobs = job_manager.list_jobs()
-    
+
+    # Sort jobs so that pinned jobs appear first, then by most recent
+    sorted_jobs = sorted(
+        jobs.items(),
+        key=lambda item: (
+            not getattr(item[1], "pinned", False),
+            item[1].created_at
+        )
+    )
+
     return {
-        "total": len(jobs),
+        "total": len(sorted_jobs),
         "jobs": [
             {
                 "job_id": job_id,
                 "status": job.status.value,
                 "job_type": job.job_type,
                 "progress": job.progress,
-                "created_at": job.created_at.isoformat()
+                "created_at": job.created_at.isoformat(),
+                "pinned": getattr(job, "pinned", False),
+                "metadata": job.metadata,
             }
-            for job_id, job in jobs.items()
+            for job_id, job in sorted_jobs
         ]
     }
 
@@ -88,5 +99,48 @@ async def cancel_job(job_id: str):
         "job_id": job_id,
         "status": "cancelled",
         "message": "Job cancelled successfully"
+    }
+
+
+@router.post("/{job_id}/pin")
+async def pin_job(job_id: str):
+    """Pin a training job."""
+    success = job_manager.set_pin(job_id, True)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    
+    job = job_manager.get_job(job_id)
+    return {
+        "job_id": job_id,
+        "pinned": True,
+        "status": job.status.value if job else None,
+    }
+
+
+@router.post("/{job_id}/unpin")
+async def unpin_job(job_id: str):
+    """Unpin a training job."""
+    success = job_manager.set_pin(job_id, False)
+    
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    
+    job = job_manager.get_job(job_id)
+    return {
+        "job_id": job_id,
+        "pinned": False,
+        "status": job.status.value if job else None,
+    }
+
+
+@router.delete("/")
+async def clear_unpinned_jobs():
+    """Delete all unpinned training jobs."""
+    cleared = job_manager.clear_unpinned_jobs()
+    
+    return {
+        "cleared": cleared,
+        "message": f"Deleted {cleared} unpinned jobs"
     }
 

@@ -16,6 +16,7 @@ const TrainingPipeline = ({ onJobCreated }: TrainingPipelineProps) => {
   const [modelType, setModelType] = useState<"xgboost" | "transformer" | "parallel">("parallel");
   const [kmerFile, setKmerFile] = useState<File | null>(null);
   const [phenotypeFile, setPhenotypeFile] = useState<File | null>(null);
+  const [rosettaFile, setRosettaFile] = useState<File | null>(null);
   const [modelName, setModelName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,8 +32,12 @@ const TrainingPipeline = ({ onJobCreated }: TrainingPipelineProps) => {
   
   // Transformer hyperparameters
   const [epochs, setEpochs] = useState(3);
-  const [batchSize, setBatchSize] = useState(16);
+  const [batchSize, setBatchSize] = useState(8);
+  const [maxGenomes, setMaxGenomes] = useState(1000);
+  const [useAllGenomes, setUseAllGenomes] = useState(false);
   const [transformerLearningRate, setTransformerLearningRate] = useState(0.00002);
+  const [useRosetta, setUseRosetta] = useState(true);
+  const [cycleIndex, setCycleIndex] = useState(0);
 
   const handleKmerFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -44,6 +49,13 @@ const TrainingPipeline = ({ onJobCreated }: TrainingPipelineProps) => {
   const handlePhenotypeFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setPhenotypeFile(e.target.files[0]);
+      setError(null);
+    }
+  };
+
+  const handleRosettaFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setRosettaFile(e.target.files[0]);
       setError(null);
     }
   };
@@ -62,6 +74,7 @@ const TrainingPipeline = ({ onJobCreated }: TrainingPipelineProps) => {
     try {
       let response;
       const k = kmerSize === "auto" ? undefined : customK;
+      const effectiveMaxGenomes = useAllGenomes ? 0 : maxGenomes;
       
       if (modelType === "xgboost") {
         response = await trainXGBoost(kmerFile, phenotypeFile, {
@@ -70,6 +83,10 @@ const TrainingPipeline = ({ onJobCreated }: TrainingPipelineProps) => {
           learning_rate: learningRate,
           n_estimators: nEstimators,
           k: k,
+          rosetta_file: rosettaFile || undefined,
+          use_rosetta_preprocessor: useRosetta,
+          max_genomes: effectiveMaxGenomes,
+          cycle_index: cycleIndex,
         });
       } else if (modelType === "transformer") {
         response = await trainTransformer(kmerFile, phenotypeFile, {
@@ -78,6 +95,10 @@ const TrainingPipeline = ({ onJobCreated }: TrainingPipelineProps) => {
           batch_size: batchSize,
           learning_rate: transformerLearningRate,
           k: k,
+          rosetta_file: rosettaFile || undefined,
+          use_rosetta_preprocessor: useRosetta,
+          max_genomes: effectiveMaxGenomes,
+          cycle_index: cycleIndex,
         });
       } else {
         // Parallel training
@@ -91,6 +112,10 @@ const TrainingPipeline = ({ onJobCreated }: TrainingPipelineProps) => {
           transformer_batch_size: batchSize,
           transformer_learning_rate: transformerLearningRate,
           k: k,
+          rosetta_file: rosettaFile || undefined,
+          use_rosetta_preprocessor: useRosetta,
+          max_genomes: effectiveMaxGenomes,
+          cycle_index: cycleIndex,
         });
       }
       
@@ -230,6 +255,46 @@ const TrainingPipeline = ({ onJobCreated }: TrainingPipelineProps) => {
                   </p>
                 </div>
               </div>
+
+              <div>
+                <Label htmlFor="rosetta-file" className="text-base font-semibold">
+                  Rosetta Mapping File (BVBRC_genome.txt, optional)
+                </Label>
+                <div className="mt-2">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      id="rosetta-file"
+                      type="file"
+                      accept=".txt,.tsv,.csv"
+                      onChange={handleRosettaFileChange}
+                      className="flex-1"
+                    />
+                    {rosettaFile && <FileCheck className="h-5 w-5 text-green-600" />}
+                  </div>
+                  {rosettaFile && (
+                    <p className="text-sm text-gray-600 mt-1">
+                      {rosettaFile.name} ({(rosettaFile.size / (1024 * 1024)).toFixed(2)} MB)
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-500 mt-1">
+                    Rosetta (BVBRC_genome.txt) maps phenotype Genome IDs to Assembly/GenBank accessions used in the k-mer file,
+                    so that features and labels line up on the same genomes.
+                  </p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <input
+                      id="use-rosetta"
+                      type="checkbox"
+                      checked={useRosetta}
+                      onChange={(e) => setUseRosetta(e.target.checked)}
+                      className="h-4 w-4"
+                    />
+                    <Label htmlFor="use-rosetta" className="text-sm cursor-pointer">
+                      Use Rosetta preprocessor (BV-BRC ID mapping). When enabled and no file is uploaded,
+                      the server will require BVBRC_genome.txt on disk.
+                    </Label>
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Model Name */}
@@ -311,7 +376,7 @@ const TrainingPipeline = ({ onJobCreated }: TrainingPipelineProps) => {
                     />
                   </div>
                   <div>
-                    <Label htmlFor="batch-size" className="text-sm">Batch Size</Label>
+                    <Label htmlFor="batch-size" className="text-sm">Batch Size (Recommended: 8)</Label>
                     <Input
                       id="batch-size"
                       type="number"
@@ -339,6 +404,54 @@ const TrainingPipeline = ({ onJobCreated }: TrainingPipelineProps) => {
               </div>
             )}
 
+            {(modelType === "xgboost" || modelType === "transformer" || modelType === "parallel") && (
+              <div className="space-y-3 p-4 bg-gray-50 rounded-lg">
+                <h3 className="font-semibold text-sm">Dataset Chunking & Cycles</h3>
+                <div className="mt-1">
+                  <Label htmlFor="max-genomes" className="text-sm">Max Genomes per Cycle (Recommended: 1000)</Label>
+                  <Input
+                    id="max-genomes"
+                    type="number"
+                    min="100"
+                    max="50000"
+                    value={maxGenomes}
+                    onChange={(e) => setMaxGenomes(parseInt(e.target.value))}
+                    className="mt-1 w-32"
+                    disabled={useAllGenomes}
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Limits genomes per training cycle to prevent memory issues. Lower values = faster, less RAM.
+                    Your data has ~7,300 genomes; set higher for full training on powerful GPUs.
+                  </p>
+                  <div className="flex items-center gap-2 mt-2">
+                    <input
+                      id="use-all-genomes"
+                      type="checkbox"
+                      checked={useAllGenomes}
+                      onChange={(e) => setUseAllGenomes(e.target.checked)}
+                      className="h-4 w-4"
+                    />
+                    <Label htmlFor="use-all-genomes" className="text-sm cursor-pointer">
+                      Use all genomes in one job (disable chunking). This may use more RAM but trains on the full dataset in a single run.
+                    </Label>
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <Label htmlFor="cycle-index" className="text-sm">Cycle Index (0 for first chunk, 1 for second, ...)</Label>
+                  <Input
+                    id="cycle-index"
+                    type="number"
+                    min="0"
+                    value={cycleIndex}
+                    onChange={(e) => setCycleIndex(parseInt(e.target.value) || 0)}
+                    className="mt-1 w-32"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Use different cycle indexes (0, 1, 2, ...) across runs to cover all genomes in deterministic chunks.
+                  </p>
+                </div>
+              </div>
+            )}
             {/* Error Display */}
             {error && (
               <Alert variant="destructive">
@@ -374,4 +487,3 @@ const TrainingPipeline = ({ onJobCreated }: TrainingPipelineProps) => {
 };
 
 export default TrainingPipeline;
-

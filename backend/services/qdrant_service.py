@@ -219,11 +219,19 @@ class QdrantService:
                 limit=top_k
             )
             
-            # Format results
+            # Format results and deduplicate by genome_id so the same genome
+            # does not appear multiple times even if Qdrant contains multiple
+            # points with identical genome_id payloads.
             similar_genomes = []
+            seen_ids = set()
             for result in results:
+                genome_id = result.payload.get('genome_id')
+                if genome_id in seen_ids:
+                    continue
+                seen_ids.add(genome_id)
+
                 similar_genomes.append({
-                    'genome_id': result.payload.get('genome_id'),
+                    'genome_id': genome_id,
                     'score': result.score,
                     'metadata': result.payload
                 })
@@ -275,7 +283,8 @@ class QdrantService:
             return False
         
         try:
-            point_id = abs(hash(genome_id)) % (10 ** 12)
+            # Use the same ID scheme as insert_genome_embedding/delete_genome
+            point_id = hash(genome_id) & 0x7FFFFFFF
             results = self.client.retrieve(
                 collection_name=self.COLLECTION_NAME,
                 ids=[point_id]
@@ -294,16 +303,46 @@ class QdrantService:
         """
         if not self.client:
             return {"error": "Qdrant not available"}
-        
+
+        # Use a raw HTTP request instead of qdrant_client.get_collection to
+        # avoid pydantic model validation issues with newer Qdrant Cloud
+        # response fields.
         try:
-            info = self.client.get_collection(self.COLLECTION_NAME)
+            import httpx
+
+            base_url = settings.qdrant_url.rstrip("/")
+            # If URL already has an explicit port, don't append :6333 again
+            has_port = False
+            try:
+                # Split off scheme
+                without_scheme = base_url.split("//", 1)[-1]
+                host_port = without_scheme.rsplit(":", 1)
+                if len(host_port) == 2 and host_port[1].isdigit():
+                    has_port = True
+            except Exception:
+                has_port = False
+
+            if has_port:
+                url = f"{base_url}/collections/{self.COLLECTION_NAME}"
+            else:
+                url = f"{base_url}:6333/collections/{self.COLLECTION_NAME}"
+
+            headers = {}
+            if settings.qdrant_api_key:
+                headers["api-key"] = settings.qdrant_api_key
+
+            resp = httpx.get(url, headers=headers, timeout=10.0)
+            resp.raise_for_status()
+            data = resp.json()
+
+            result = data.get("result", {})
             return {
-                'collection_name': self.COLLECTION_NAME,
-                'vectors_count': info.vectors_count,
-                'points_count': info.points_count,
-                'status': info.status
+                "collection_name": result.get("name", self.COLLECTION_NAME),
+                "vectors_count": result.get("vectors_count"),
+                "points_count": result.get("points_count"),
+                "status": result.get("status"),
             }
         except Exception as e:
-            logger.error(f"Error getting collection stats: {e}")
+            logger.warning(f"Error getting collection stats via HTTP: {e}")
             return {"error": str(e)}
 

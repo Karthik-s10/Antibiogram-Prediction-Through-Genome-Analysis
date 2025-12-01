@@ -253,6 +253,53 @@ const TrainingStatus = ({ jobId, modelType, onComplete, onNewTraining }: Trainin
                 </Card>
               </div>
 
+              {status.metrics.per_antibiotic_metrics && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <BarChart3 className="h-5 w-5" />
+                    <h3 className="font-semibold text-sm">Performance Overview (per antibiotic)</h3>
+                  </div>
+                  <div className="space-y-2 max-h-64 overflow-auto pr-1">
+                    {Object.entries(status.metrics.per_antibiotic_metrics).map(
+                      ([antibiotic, metrics]: [string, any]) => {
+                        if (metrics.error) return null;
+                        const acc = typeof metrics.accuracy === "number" ? metrics.accuracy * 100 : 0;
+                        const f1 = typeof metrics.f1_macro === "number" ? metrics.f1_macro * 100 : 0;
+                        const maxBar = Math.max(acc, f1, 1);
+                        const accWidth = (acc / maxBar) * 100;
+                        const f1Width = (f1 / maxBar) * 100;
+                        return (
+                          <div key={`${antibiotic}-chart`} className="space-y-1">
+                            <div className="flex justify-between text-xs text-slate-700">
+                              <span className="font-medium capitalize truncate max-w-[50%]">
+                                {antibiotic}
+                              </span>
+                              <span className="text-[11px] text-slate-500">
+                                Acc {(acc || 0).toFixed(1)}% · F1 {(f1 || 0).toFixed(1)}%
+                              </span>
+                            </div>
+                            <div className="flex gap-1 items-center">
+                              <div className="flex-1 h-2 rounded bg-slate-200 overflow-hidden">
+                                <div
+                                  className="h-2 bg-green-500"
+                                  style={{ width: `${accWidth}%` }}
+                                />
+                              </div>
+                              <div className="flex-1 h-2 rounded bg-slate-200 overflow-hidden">
+                                <div
+                                  className="h-2 bg-blue-500"
+                                  style={{ width: `${f1Width}%` }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+                    )}
+                  </div>
+                </div>
+              )}
+
               {/* Per-Antibiotic Metrics Table */}
               {status.metrics.per_antibiotic_metrics && (
                 <div>

@@ -80,6 +80,12 @@ interface GenomeData {
   ncbiAccession?: string;
   gcContent?: number;
   sequenceAvailable: boolean;
+
+   // Optional fields populated when FASTA content is fetched/assessed
+   fastaContent?: string;
+   fastaQuality?: string;
+   qualityScore?: number;
+   fileType?: string;
 }
 
 interface NCBIGenomeSearchProps {

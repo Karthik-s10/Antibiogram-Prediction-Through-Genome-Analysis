@@ -43,6 +43,8 @@ class DataPreprocessor:
         self.cache_dir.mkdir(exist_ok=True)
         
         self.id_mapping: Optional[Dict[str, str]] = None
+        # Assembly-level metadata (e.g. species/strain) keyed by Assembly Accession
+        self.assembly_metadata: Dict[str, Dict[str, str]] = {}
         self._cache_file = self.cache_dir / "aligned_data_cache.pkl"
         
     def load_id_mapping(self) -> Dict[str, str]:
@@ -157,6 +159,53 @@ class DataPreprocessor:
                 f"Mapped {after_count} phenotype records "
                 f"({before_count - after_count} unmapped records dropped)"
             )
+            
+            # Build assembly-level metadata (organism / genome name and strain) for later use
+            try:
+                cols = pheno_df.columns
+                has_name_cols = any(c in cols for c in ["Genome Name", "Organism Name", "Organism"])
+                has_strain_col = "Strain" in cols
+
+                if has_name_cols or has_strain_col:
+                    subset_cols = ["Assembly Accession"]
+                    for c in ["Genome Name", "Organism Name", "Organism", "Strain"]:
+                        if c in cols:
+                            subset_cols.append(c)
+
+                    meta_df = pheno_df[subset_cols].dropna(subset=["Assembly Accession"])
+
+                    for _, row in meta_df.iterrows():
+                        assembly = str(row["Assembly Accession"]).strip()
+                        if not assembly:
+                            continue
+
+                        meta = self.assembly_metadata.get(assembly, {})
+
+                        genome_name = None
+                        if "Genome Name" in meta_df.columns and pd.notna(row["Genome Name"]):
+                            genome_name = str(row["Genome Name"]).strip()
+
+                        organism_name = None
+                        if "Organism Name" in meta_df.columns and pd.notna(row["Organism Name"]):
+                            organism_name = str(row["Organism Name"]).strip()
+                        elif "Organism" in meta_df.columns and pd.notna(row["Organism"]):
+                            organism_name = str(row["Organism"]).strip()
+
+                        strain = None
+                        if "Strain" in meta_df.columns and pd.notna(row["Strain"]):
+                            strain = str(row["Strain"]).strip()
+
+                        if genome_name and "genome_name" not in meta:
+                            meta["genome_name"] = genome_name
+                        if organism_name and "organism_name" not in meta:
+                            meta["organism_name"] = organism_name
+                        if strain and "strain" not in meta:
+                            meta["strain"] = strain
+
+                        if meta:
+                            self.assembly_metadata[assembly] = meta
+            except Exception as e:
+                logger.warning(f"Failed to build assembly metadata from phenotype data: {e}")
             
             return pheno_df
             

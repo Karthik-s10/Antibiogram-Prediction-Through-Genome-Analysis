@@ -4,7 +4,7 @@ Provides endpoints for model training, prediction, and status monitoring.
 """
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from contextlib import asynccontextmanager
 import logging
 import warnings
@@ -14,6 +14,13 @@ warnings.filterwarnings(
     "ignore",
     message="`torch.utils._pytree._register_pytree_node` is deprecated.",
     category=FutureWarning,
+)
+
+# Suppress pydantic UserWarning about protected namespace "model_" for field "model_name"
+warnings.filterwarnings(
+    "ignore",
+    message="Field \"model_name\" has conflict with protected namespace \"model_\".",
+    category=UserWarning,
 )
 
 from config import settings
@@ -74,6 +81,11 @@ async def root():
         "version": "1.0.0",
         "docs": "/docs"
     }
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    return Response(status_code=204)
 
 
 @app.get("/health")

@@ -65,6 +65,49 @@ const ResultsDashboard = ({
     }
   };
 
+  const getConfidenceTier = (confidence: number) => {
+    if (confidence >= 0.8) return "high";
+    if (confidence >= 0.6) return "moderate";
+    return "low";
+  };
+
+  const getResistanceRisk = (prediction: PredictionResult): number => {
+    if (prediction.classProbabilities) {
+      const { S, I, R } = prediction.classProbabilities;
+      const s = typeof S === "number" ? S : 0;
+      const i = typeof I === "number" ? I : 0;
+      const r = typeof R === "number" ? R : 0;
+      // Treat R as full risk and I as half risk to emphasize intermediate cases
+      const risk = r + 0.5 * i;
+      if (!Number.isFinite(risk)) return 0;
+      return Math.min(1, Math.max(0, risk));
+    }
+
+    // Fallback when we don't have per-class probabilities (older paths/demo)
+    if (prediction.prediction === "R") {
+      return Math.min(1, Math.max(0, prediction.confidence));
+    }
+    if (prediction.prediction === "I") {
+      return 0.5;
+    }
+    // Susceptible: invert confidence so low-confidence S looks riskier
+    return Math.min(1, Math.max(0, 1 - prediction.confidence));
+  };
+
+  const getStatusColorByRisk = (risk: number) => {
+    // Map risk 0–1 to a rich but soft color gradient using light/pastel shades
+    // dark red → red → orange → dark yellow → yellow → light yellow → yellow–green → green → dark green
+    if (risk >= 0.9) return "bg-red-200 text-red-900 border-red-400"; // darkest red (soft)
+    if (risk >= 0.75) return "bg-red-100 text-red-800 border-red-300"; // red
+    if (risk >= 0.6) return "bg-orange-100 text-orange-800 border-orange-300"; // orange
+    if (risk >= 0.5) return "bg-amber-100 text-amber-800 border-amber-300"; // dark yellow
+    if (risk >= 0.4) return "bg-yellow-100 text-yellow-800 border-yellow-300"; // yellow
+    if (risk >= 0.3) return "bg-yellow-50 text-yellow-700 border-yellow-200"; // light yellow
+    if (risk >= 0.2) return "bg-lime-100 text-lime-800 border-lime-300"; // yellow–green mix
+    if (risk >= 0.1) return "bg-green-100 text-green-800 border-green-300"; // green
+    return "bg-green-50 text-green-700 border-green-200"; // dark green (very low risk)
+  };
+
   const handleDownloadReport = () => {
     // Generate and download ML analysis report
     const reportData = {
@@ -120,6 +163,11 @@ const ResultsDashboard = ({
                     {analysisSummary.modelUsed && (
                       <span>Model: {analysisSummary.modelUsed}</span>
                     )}
+                    {analysisSummary.ensembleDetails && (
+                      <span className="text-blue-700 font-medium">
+                        Ensemble: Transformer (primary) + XGBoost (base)
+                      </span>
+                    )}
                   </div>
                   {analysisSummary.similarGenomes && analysisSummary.similarGenomes.length > 0 && (
                     <div className="flex items-center gap-2 text-sm text-blue-600">
@@ -155,81 +203,190 @@ const ResultsDashboard = ({
 
             <TabsContent value="profile" className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {predictions.map((prediction, index) => (
-                  <div
-                    key={index}
-                    className="border rounded-lg p-4 hover:shadow-md transition-shadow"
-                  >
-                    <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <h3 className="font-medium text-lg">
-                          {prediction.antibiotic}
-                        </h3>
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <p className="text-sm text-gray-500 flex items-center cursor-help">
-                                Confidence:{" "}
-                                {(prediction.confidence * 100).toFixed(1)}%
-                                <Info className="ml-1 h-3 w-3" />
-                              </p>
-                            </TooltipTrigger>
-                            <TooltipContent className="max-w-sm">
-                              <div className="space-y-2">
-                                <p className="font-medium">
-                                  ML Analysis Result:
-                                </p>
-                                <p className="text-sm">
-                                  {prediction.reasoning}
-                                </p>
-                                <p className="text-xs mt-1">
-                                  Based on {prediction.markers.length} genetic
-                                  markers
-                                </p>
-                              </div>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      </div>
-                      <div className="flex flex-col items-end">
-                        <Badge
-                          className={`text-lg px-3 py-1 font-bold ${getStatusColor(prediction.prediction)}`}
-                        >
-                          {prediction.prediction}
-                        </Badge>
-                        <span className="text-xs text-gray-600 mt-1">
-                          {getStatusText(prediction.prediction)}
-                        </span>
-                      </div>
-                    </div>
+                {predictions.map((prediction, index) => {
+                  const ensemble =
+                    analysisSummary?.ensembleDetails?.per_antibiotic?.[
+                      prediction.antibiotic
+                    ];
 
-                    <div className="text-xs text-gray-600">
-                      <p className="font-medium mb-1">Key markers detected:</p>
-                      <div className="space-y-1">
-                        {prediction.markers.slice(0, 2).map((marker, idx) => (
-                          <div key={idx} className="flex justify-between">
-                            <span>{marker.name}</span>
-                            <span
-                              className={
-                                marker.impact > 0
-                                  ? "text-red-600"
-                                  : "text-green-600"
-                              }
-                            >
-                              {marker.impact > 0 ? "+" : ""}
-                              {(marker.impact * 100).toFixed(0)}%
-                            </span>
+                  const confidenceTier = getConfidenceTier(prediction.confidence);
+                  const confidenceTierLabel =
+                    confidenceTier === "high"
+                      ? "High confidence"
+                      : confidenceTier === "moderate"
+                      ? "Moderate confidence"
+                      : "Low / uncertain confidence";
+
+                  const riskScore = getResistanceRisk(prediction);
+
+                  const transformerPrediction =
+                    ensemble?.transformer?.prediction ?? null;
+                  const xgboostPrediction =
+                    ensemble?.xgboost?.prediction ?? null;
+                  const modelsDisagree =
+                    transformerPrediction &&
+                    xgboostPrediction &&
+                    transformerPrediction !== xgboostPrediction;
+
+                  return (
+                    <div
+                      key={index}
+                      className="border rounded-lg p-4 hover:shadow-md transition-shadow"
+                    >
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <h3 className="font-medium text-lg">
+                            {prediction.antibiotic}
+                          </h3>
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <p className="text-sm text-gray-500 flex items-center cursor-help">
+                                  Confidence:{" "}
+                                  {(prediction.confidence * 100).toFixed(1)}%
+                                  <Info className="ml-1 h-3 w-3" />
+                                </p>
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-sm">
+                                <div className="space-y-2">
+                                  <p className="font-medium">
+                                    ML Analysis Result:
+                                  </p>
+                                  <p className="text-sm">
+                                    {prediction.reasoning}
+                                  </p>
+                                  <p className="text-xs mt-1">
+                                    Based on {prediction.markers.length} genetic
+                                    markers
+                                  </p>
+                                  <p className="text-xs mt-1 text-gray-600">
+                                    Confidence tier: {confidenceTierLabel}
+                                  </p>
+                                </div>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+                        </div>
+                        <div className="flex flex-col items-end">
+                          <Badge
+                            className={`text-lg px-3 py-1 font-bold ${getStatusColorByRisk(
+                              riskScore
+                            )}`}
+                          >
+                            {prediction.prediction}
+                          </Badge>
+                          <span className="text-xs text-gray-600 mt-1">
+                            {getStatusText(prediction.prediction)}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-xs text-gray-600 space-y-3">
+                        {prediction.markers.length > 0 && (
+                          <div>
+                            <p className="font-medium mb-1">
+                              Key markers detected
+                              <span className="ml-1 text-[10px] text-slate-500">
+                                (XGBoost k-mers)
+                              </span>
+                            </p>
+                            <div className="space-y-1">
+                              {prediction.markers.slice(0, 2).map((marker, idx) => {
+                                const isXgb = marker.id.startsWith("xgb-");
+                                const sourceLabel = isXgb ? "XGBoost" : "Transformer";
+                                return (
+                                  <div key={idx} className="flex justify-between items-baseline">
+                                    <div className="flex flex-col">
+                                      <span>{marker.name}</span>
+                                      <span className="text-[10px] text-slate-500">{sourceLabel}</span>
+                                    </div>
+                                    <span
+                                      className={
+                                        marker.impact > 0
+                                          ? "text-red-600"
+                                          : "text-green-600"
+                                      }
+                                    >
+                                      {marker.impact > 0 ? "+" : ""}
+                                      {(marker.impact * 100).toFixed(0)}%
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                              {prediction.markers.length > 2 && (
+                                <p className="text-gray-500">
+                                  +{prediction.markers.length - 2} more...
+                                </p>
+                              )}
+                            </div>
                           </div>
-                        ))}
-                        {prediction.markers.length > 2 && (
-                          <p className="text-gray-500">
-                            +{prediction.markers.length - 2} more...
-                          </p>
+                        )}
+
+                        {ensemble && (
+                          <div
+                            className={`mt-2 rounded-md p-2 border ${
+                              modelsDisagree
+                                ? "bg-amber-50 border-amber-300"
+                                : "bg-slate-50 border-slate-200"
+                            }`}
+                          >
+                            <p className="font-semibold mb-1 text-slate-800 text-[11px]">
+                              Model contributions
+                            </p>
+                            <div className="grid grid-cols-3 gap-2 text-[11px]">
+                              <div className="font-medium text-slate-500">
+                                Model
+                              </div>
+                              <div className="font-medium text-slate-500">
+                                Prediction
+                              </div>
+                              <div className="font-medium text-slate-500">
+                                Confidence
+                              </div>
+
+                              <div className="text-emerald-700 font-semibold">
+                                Transformer
+                                {" "}
+                                <span className="text-[10px] font-normal text-emerald-600">
+                                  (primary)
+                                </span>
+                              </div>
+                              <div>
+                                {ensemble.transformer?.prediction ?? "-"}
+                              </div>
+                              <div>
+                                {ensemble.transformer?.confidence !== undefined
+                                  ? `${(ensemble.transformer.confidence * 100).toFixed(1)}%`
+                                  : "-"}
+                              </div>
+
+                              <div className="text-slate-700 font-semibold">
+                                XGBoost
+                                {" "}
+                                <span className="text-[10px] font-normal text-slate-500">
+                                  (base)
+                                </span>
+                              </div>
+                              <div>{ensemble.xgboost?.prediction ?? "-"}</div>
+                              <div>
+                                {ensemble.xgboost?.confidence !== undefined
+                                  ? `${(ensemble.xgboost.confidence * 100).toFixed(1)}%`
+                                  : "-"}
+                              </div>
+                            </div>
+
+                            {modelsDisagree && (
+                              <p className="mt-2 text-[11px] text-amber-700 font-medium">
+                                Models disagree for this antibiotic (Transformer vs XGBoost). Interpret
+                                with caution.
+                              </p>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
 
               <div className="mt-8 p-4 bg-gray-50 rounded-lg">
@@ -274,7 +431,19 @@ const ResultsDashboard = ({
                           <div key={idx} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
                             <div>
                               <p className="font-medium">{genome.genome_id || 'Unknown ID'}</p>
-                              <p className="text-sm text-gray-600">{genome.species || 'Unknown species'}</p>
+                              {(() => {
+                                const displayName =
+                                  genome.organism_name ||
+                                  genome.genome_name ||
+                                  genome.species ||
+                                  "Unknown species";
+                                const variant = genome.strain;
+                                return (
+                                  <p className="text-sm text-gray-600">
+                                    {variant ? `${displayName} (${variant})` : displayName}
+                                  </p>
+                                );
+                              })()}
                             </div>
                             <div className="text-right">
                               <p className="text-lg font-bold text-blue-600">

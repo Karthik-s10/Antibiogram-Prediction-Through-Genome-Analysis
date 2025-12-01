@@ -19,10 +19,11 @@ class EmbeddingService:
     Converts DNA sequences into 768-dimensional vectors for similarity search.
     """
     
-    MODEL_NAME = "zhihan1996/DNABERT-6"
+    # Use DNABERT v1 6-mer backbone for embeddings
+    MODEL_NAME = "zhihan1996/DNA_bert_6"
     EMBEDDING_DIM = 768
     MAX_LENGTH = 512  # BERT max sequence length
-    KMER_SIZE = 6  # DNABERT-6 uses 6-mers
+    KMER_SIZE = 6   # DNABERT-6 uses 6-mers
     
     def __init__(self, device: Optional[str] = None):
         """
@@ -51,15 +52,10 @@ class EmbeddingService:
         try:
             logger.info(f"Loading DNABERT model: {self.MODEL_NAME}")
             
-            self.tokenizer = AutoTokenizer.from_pretrained(
-                self.MODEL_NAME,
-                trust_remote_code=True
-            )
+            # Use standard transformers tokenizer with case preserved (DNABERT-6 k-mers are case-sensitive)
+            self.tokenizer = AutoTokenizer.from_pretrained(self.MODEL_NAME, do_lower_case=False)
             
-            self.model = AutoModel.from_pretrained(
-                self.MODEL_NAME,
-                trust_remote_code=True
-            )
+            self.model = AutoModel.from_pretrained(self.MODEL_NAME)
             
             self.model.to(self.device)
             self.model.eval()
@@ -240,22 +236,41 @@ class EmbeddingService:
             return self.embed_sequence(full_sequence)
         
         # Sliding window for long sequences
-        logger.info(f"Using sliding window for long sequence ({len(full_sequence)} bp)")
+        seq_len = len(full_sequence)
+        logger.info(f"Using sliding window for long sequence ({seq_len} bp)")
         
-        window_embeddings = []
-        stride = max_seq_length // 2
-        
-        for start in range(0, len(full_sequence), stride):
+        # Use non-overlapping windows for speed. Each window is truncated to
+        # DNABERT's max token length internally, so adjacent windows still
+        # provide broad coverage across the genome while cutting the total
+        # number of windows about in half compared to 50% overlap.
+        stride = max_seq_length
+
+        # Build all windows first, then embed in batches on the configured device
+        windows: List[str] = []
+        for start in range(0, seq_len, stride):
             window = full_sequence[start:start + max_seq_length]
             if len(window) >= self.KMER_SIZE:
-                emb = self.embed_sequence(window)
-                window_embeddings.append(emb)
-        
-        # Average embeddings
+                windows.append(window)
+
+        if not windows:
+            logger.warning("No valid windows generated for sliding-window embedding")
+            return [0.0] * self.EMBEDDING_DIM
+
+        logger.info(
+            f"Prepared {len(windows)} windows for DNABERT sliding-window embedding "
+            f"(window ~{max_seq_length} bp, stride {stride} bp)"
+        )
+
+        # Use batched embedding on the chosen device (GPU if available)
+        window_embeddings = self.embed_sequences(windows, batch_size=8)
+
+        # Average embeddings across windows
         if window_embeddings:
             avg_embedding = np.mean(window_embeddings, axis=0).tolist()
+            logger.info("Computed averaged embedding from sliding-window DNABERT embeddings")
             return avg_embedding
         
+        logger.warning("Sliding-window embedding produced no vectors; returning zero vector")
         return [0.0] * self.EMBEDDING_DIM
     
     def embed_fasta_file(self, fasta_path: str) -> List[float]:

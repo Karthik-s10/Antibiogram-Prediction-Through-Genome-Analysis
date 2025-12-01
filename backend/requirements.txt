@@ -22,13 +22,14 @@ python-multipart==0.0.6
 # ML and data processing
 xgboost==2.0.3
 transformers==4.37.2
+einops==0.8.1
 
 # PyTorch with GPU support (CUDA 12.1) - Default installation
 # This will automatically use GPU version if available
 # For CUDA 11.8, change to: --extra-index-url https://download.pytorch.org/whl/cu118
 # For CPU only, remove the --extra-index-url line
 --extra-index-url https://download.pytorch.org/whl/cu121
-torch>=2.0.0
+torch==2.5.1
 torchvision>=0.15.0
 torchaudio>=2.0.0
 
@@ -50,4 +51,6 @@ supabase==2.3.4
 python-dotenv==1.0.1
 pydantic==2.5.3
 pydantic-settings==2.1.0
+
+
 

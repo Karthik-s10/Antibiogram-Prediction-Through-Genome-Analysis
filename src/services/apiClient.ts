@@ -18,6 +18,7 @@ export interface JobStatus {
   progress: number;
   current_step: string;
   job_type: string;
+  pinned?: boolean;
   metadata: Record<string, any>;
   metrics?: Record<string, any>;
   error?: string;
@@ -29,14 +30,35 @@ export interface JobStatus {
 export interface PredictionResponse {
   status: string;
   genome_name: string;
+  model_type?: string;
+  models_used?: {
+    xgboost?: any;
+    transformer?: any;
+  };
   predictions: Array<{
     antibiotic: string;
     prediction: 'S' | 'I' | 'R';
     confidence: number;
-    markers?: Array<{
-      name: string;
-      impact: number;
-      confidence: number;
+    class_probabilities?: {
+      S: number;
+      I: number;
+      R: number;
+    };
+    xgboost_markers?: Array<{
+      kmer: string;
+      importance: number;
+      normalized_importance?: number;
+      count?: number;
+    }>;
+    transformer_markers?: Array<{
+      gene_index: number;
+      class_index: number;
+      class_label: 'S' | 'I' | 'R' | 'Unknown';
+      importance?: number;
+      normalized_importance?: number;
+      best_hit_title?: string;
+      best_hit_id?: string;
+      best_hit_identity?: number | null;
     }>;
   }>;
   analysis_summary?: {
@@ -49,7 +71,14 @@ export interface PredictionResponse {
       genome_id: string;
       species: string;
       similarity_score: number;
+      organism_name?: string | null;
+      genome_name?: string | null;
+      strain?: string | null;
     }>;
+    n_genes?: number | null;
+    similarity_search_performed?: boolean;
+    similarity_search_required?: boolean;
+    ensemble_details?: any;
   };
 }
 
@@ -65,6 +94,10 @@ export async function trainXGBoost(
     learning_rate?: number;
     n_estimators?: number;
     k?: number;
+    rosetta_file?: File;
+    use_rosetta_preprocessor?: boolean;
+    max_genomes?: number;
+    cycle_index?: number;
   }
 ): Promise<TrainingJobResponse> {
   const formData = new FormData();
@@ -76,6 +109,17 @@ export async function trainXGBoost(
   if (options?.learning_rate) formData.append('learning_rate', options.learning_rate.toString());
   if (options?.n_estimators) formData.append('n_estimators', options.n_estimators.toString());
   if (options?.k) formData.append('k', options.k.toString());
+  if (options?.rosetta_file) formData.append('rosetta_file', options.rosetta_file);
+  if (options?.use_rosetta_preprocessor !== undefined) {
+    formData.append('use_rosetta_preprocessor', String(options.use_rosetta_preprocessor));
+  }
+  if (options?.max_genomes) formData.append('max_genomes', options.max_genomes.toString());
+  if (options?.cycle_index !== undefined) {
+    formData.append('cycle_index', options.cycle_index.toString());
+  }
+  if (options?.cycle_index !== undefined) {
+    formData.append('cycle_index', options.cycle_index.toString());
+  }
   
   const response = await fetch(`${API_BASE_URL}/api/train/xgboost`, {
     method: 'POST',
@@ -91,6 +135,91 @@ export async function trainXGBoost(
 }
 
 /**
+ * Fetch XGBoost explainability report for a given model name
+ */
+export async function getXGBoostExplainability(modelName: string): Promise<any> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/predict/xgboost_explainability/${encodeURIComponent(modelName)}`,
+  );
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to fetch explainability report' }));
+    throw new Error(error.detail || 'Failed to fetch explainability report');
+  }
+
+  return response.json();
+}
+
+/**
+ * Run BLAST for a list of k-mers (best-effort, requires Biopython on backend)
+ */
+export async function blastKmers(
+  kmers: string[],
+  maxHits: number = 1,
+): Promise<{ kmers: Record<string, any[]> }> {
+  const response = await fetch(`${API_BASE_URL}/api/predict/xgboost_blast_kmers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kmers, max_hits: maxHits }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'BLAST request failed' }));
+    throw new Error(error.detail || 'BLAST request failed');
+  }
+
+  return response.json();
+}
+
+/**
+ * Pin a training job
+ */
+export async function pinJob(jobId: string): Promise<{ job_id: string; pinned: boolean; status?: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/status/${jobId}/pin`, {
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to pin job' }));
+    throw new Error(error.detail || 'Failed to pin job');
+  }
+
+  return response.json();
+}
+
+/**
+ * Unpin a training job
+ */
+export async function unpinJob(jobId: string): Promise<{ job_id: string; pinned: boolean; status?: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/status/${jobId}/unpin`, {
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to unpin job' }));
+    throw new Error(error.detail || 'Failed to unpin job');
+  }
+
+  return response.json();
+}
+
+/**
+ * Clear all unpinned training jobs
+ */
+export async function clearUnpinnedJobs(): Promise<{ cleared: number; message: string }> {
+  const response = await fetch(`${API_BASE_URL}/api/status/`, {
+    method: 'DELETE',
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to clear jobs' }));
+    throw new Error(error.detail || 'Failed to clear jobs');
+  }
+
+  return response.json();
+}
+
+/**
  * Train a Transformer model
  */
 export async function trainTransformer(
@@ -102,6 +231,10 @@ export async function trainTransformer(
     batch_size?: number;
     learning_rate?: number;
     k?: number;
+    rosetta_file?: File;
+    use_rosetta_preprocessor?: boolean;
+    max_genomes?: number;
+    cycle_index?: number;
   }
 ): Promise<TrainingJobResponse> {
   const formData = new FormData();
@@ -113,6 +246,11 @@ export async function trainTransformer(
   if (options?.batch_size) formData.append('batch_size', options.batch_size.toString());
   if (options?.learning_rate) formData.append('learning_rate', options.learning_rate.toString());
   if (options?.k) formData.append('k', options.k.toString());
+  if (options?.rosetta_file) formData.append('rosetta_file', options.rosetta_file);
+  if (options?.use_rosetta_preprocessor !== undefined) {
+    formData.append('use_rosetta_preprocessor', String(options.use_rosetta_preprocessor));
+  }
+  if (options?.max_genomes) formData.append('max_genomes', options.max_genomes.toString());
   
   const response = await fetch(`${API_BASE_URL}/api/train/transformer`, {
     method: 'POST',
@@ -142,6 +280,10 @@ export async function trainParallel(
     transformer_batch_size?: number;
     transformer_learning_rate?: number;
     k?: number;
+    rosetta_file?: File;
+    use_rosetta_preprocessor?: boolean;
+    max_genomes?: number;
+    cycle_index?: number;
   }
 ): Promise<{
   parent_job_id: string;
@@ -163,6 +305,11 @@ export async function trainParallel(
   if (options?.transformer_batch_size) formData.append('transformer_batch_size', options.transformer_batch_size.toString());
   if (options?.transformer_learning_rate) formData.append('transformer_learning_rate', options.transformer_learning_rate.toString());
   if (options?.k) formData.append('k', options.k.toString());
+  if (options?.rosetta_file) formData.append('rosetta_file', options.rosetta_file);
+  if (options?.use_rosetta_preprocessor !== undefined) {
+    formData.append('use_rosetta_preprocessor', String(options.use_rosetta_preprocessor));
+  }
+  if (options?.max_genomes) formData.append('max_genomes', options.max_genomes.toString());
   
   const response = await fetch(`${API_BASE_URL}/api/train/parallel`, {
     method: 'POST',
@@ -223,9 +370,17 @@ export async function cancelJob(jobId: string): Promise<{ status: string; messag
 /**
  * Predict antibiotic resistance from genome
  */
-export async function predictResistance(genomeFile: File): Promise<PredictionResponse> {
+export async function predictResistance(
+  genomeFile: File,
+  modelMode: 'auto' | 'xgboost' | 'transformer' | 'both' = 'auto',
+  options?: { enableBlast?: boolean },
+): Promise<PredictionResponse> {
   const formData = new FormData();
   formData.append('genome_file', genomeFile);
+  formData.append('model_mode', modelMode);
+  if (options?.enableBlast !== undefined) {
+    formData.append('enable_blast', String(options.enableBlast));
+  }
   
   const response = await fetch(`${API_BASE_URL}/api/predict/`, {
     method: 'POST',
