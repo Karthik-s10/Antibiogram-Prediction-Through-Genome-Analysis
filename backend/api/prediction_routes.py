@@ -4,7 +4,7 @@ Handles genome uploads and returns antibiogram predictions.
 """
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any, Tuple
 import numpy as np
 import os
 import glob
@@ -284,6 +284,188 @@ def _compute_transformer_markers_for_sample(
                     continue
 
     return markers_by_ab
+
+
+def _adjust_confidence_with_similarity(
+    antibiotic: str,
+    pred_label: str,
+    confidence: float,
+    class_probs: Dict[str, float],
+    similar_genomes: List[Dict[str, Any]],
+) -> Tuple[float, Dict[str, float]]:
+    if not similar_genomes:
+        return confidence, class_probs
+
+    agree_weight = 0.0
+    disagree_weight = 0.0
+
+    for similar in similar_genomes[:5]:
+        metadata = similar.get("metadata", {}) or {}
+        resistance_profile = metadata.get("resistance_profile", {}) or {}
+        if not isinstance(resistance_profile, dict):
+            continue
+        if antibiotic not in resistance_profile:
+            continue
+        similar_phenotype = resistance_profile[antibiotic]
+        if similar_phenotype not in ("S", "I", "R"):
+            continue
+        try:
+            score = float(similar.get("score", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            score = 0.0
+        if score <= 0.0:
+            continue
+        if similar_phenotype == pred_label:
+            agree_weight += score
+        else:
+            disagree_weight += score
+
+    total_weight = agree_weight + disagree_weight
+    if total_weight <= 0.0:
+        return confidence, class_probs
+
+    agreement_ratio = agree_weight / total_weight
+    disagreement_ratio = disagree_weight / total_weight
+
+    new_conf = confidence
+    new_probs = dict(class_probs)
+
+    if agreement_ratio >= 0.7 and agree_weight >= 1.0:
+        if agreement_ratio >= 0.9:
+            delta = 0.3
+        else:
+            delta = 0.2
+        new_conf = min(0.99, confidence + delta)
+
+        prob_vec = [
+            float(new_probs.get("S", 0.0)),
+            float(new_probs.get("I", 0.0)),
+            float(new_probs.get("R", 0.0)),
+        ]
+        label_index = {"S": 0, "I": 1, "R": 2}.get(pred_label)
+        if label_index is not None:
+            beta = 0.7
+            one_hot = [0.0, 0.0, 0.0]
+            one_hot[label_index] = 1.0
+            blended = [beta * p + (1.0 - beta) * h for p, h in zip(prob_vec, one_hot)]
+            total = sum(blended)
+            if total > 0.0:
+                blended = [p / total for p in blended]
+            new_probs = {
+                "S": blended[0],
+                "I": blended[1],
+                "R": blended[2],
+            }
+    elif disagreement_ratio >= 0.7 and disagree_weight >= 1.0:
+        new_conf = max(0.05, confidence - 0.2)
+
+    return new_conf, new_probs
+
+
+def _extract_query_hints_from_fasta(fasta_content: str, filename: str) -> Dict[str, Optional[str]]:
+    """Extract simple species / accession hints from FASTA header and filename.
+
+    This is heuristic and best-effort. It does NOT affect core predictions,
+    only how we re-rank similarity search results.
+    """
+    header_line: Optional[str] = None
+    for line in fasta_content.split('\n'):
+        line = line.strip()
+        if line.startswith('>'):
+            header_line = line
+            break
+
+    species_hint: Optional[str] = None
+    accession_hint: Optional[str] = None
+
+    if header_line:
+        header_text = header_line.lstrip('>').strip()
+        # Overall accession-like token (first token)
+        tokens = header_text.split()
+        if tokens:
+            accession_hint = tokens[0]
+
+        # For headers like ENA|AP011121|AP011121.1 Acetobacter pasteurianus ...
+        # take the segment after the last '|' and then the first two words
+        parts = header_text.split('|')
+        tail = parts[-1].strip() if parts else header_text
+        tail_tokens = tail.split()
+        if len(tail_tokens) >= 3:
+            # tail_tokens[0] is often accession; [1] [2] are Genus species
+            genus = tail_tokens[1]
+            species = tail_tokens[2]
+            species_hint = f"{genus} {species}"
+
+    # Filename stem as an additional weak hint
+    try:
+        name_hint = Path(filename).stem
+    except Exception:
+        name_hint = None
+
+    return {
+        'species_hint': species_hint,
+        'accession_hint': accession_hint,
+        'name_hint': name_hint,
+    }
+
+
+def _rerank_similar_genomes(
+    similar_genomes: List[Dict[str, Any]],
+    hints: Dict[str, Optional[str]],
+) -> List[Dict[str, Any]]:
+    """Re-rank similarity results using simple metadata hints.
+
+    Boost genomes whose metadata (species / names / genome_id) matches hints
+    extracted from the FASTA header or filename.
+    """
+    if not similar_genomes or not hints:
+        return similar_genomes
+
+    species_hint = (hints.get('species_hint') or '').lower()
+    accession_hint = (hints.get('accession_hint') or '').lower()
+    name_hint = (hints.get('name_hint') or '').lower()
+
+    if not (species_hint or accession_hint or name_hint):
+        return similar_genomes
+
+    reranked: List[Tuple[float, Dict[str, Any]]] = []
+
+    for g in similar_genomes:
+        base_score = 0.0
+        try:
+            base_score = float(g.get('score', 0.0) or 0.0)
+        except (TypeError, ValueError):
+            base_score = 0.0
+
+        boost = 1.0
+
+        metadata = g.get('metadata', {}) or {}
+        meta_text_parts: List[str] = []
+        for key in ('species', 'organism_name', 'genome_name', 'strain'):
+            val = metadata.get(key)
+            if isinstance(val, str):
+                meta_text_parts.append(val)
+        genome_id_val = g.get('genome_id') or metadata.get('genome_id')
+        if isinstance(genome_id_val, str):
+            meta_text_parts.append(genome_id_val)
+
+        meta_text = ' '.join(meta_text_parts).lower()
+
+        if species_hint and species_hint in meta_text:
+            boost += 0.25
+        if accession_hint and accession_hint in meta_text:
+            boost += 0.15
+        if name_hint and name_hint in meta_text:
+            boost += 0.10
+
+        new_score = base_score * boost
+        # Update score so downstream weighting (e.g. confidence adjust) uses it
+        g['score'] = new_score
+        reranked.append((new_score, g))
+
+    # Sort by boosted score descending
+    reranked.sort(key=lambda t: t[0], reverse=True)
+    return [g for _, g in reranked]
 
 
 def generate_mock_prediction(fasta_content: str, filename: str) -> Dict:
@@ -576,6 +758,9 @@ async def predict_resistance(
         content = await genome_file.read()
         fasta_content = content.decode('utf-8')
 
+        # Extract simple species/accession hints from FASTA header + filename
+        query_hints = _extract_query_hints_from_fasta(fasta_content, genome_file.filename)
+
         model_mode = (prediction_model_mode or "auto").lower()
 
         # Determine effective BLAST mode for this request. When enable_blast is
@@ -652,6 +837,8 @@ async def predict_resistance(
                                     query_embedding,
                                     top_k=5,
                                 )
+                                # Use header/filename hints to nudge ordering
+                                similar_genomes = _rerank_similar_genomes(similar_genomes, query_hints)
                                 similarity_search_successful = True
                                 logger.info(
                                     f"[ensemble] ✅ Found {len(similar_genomes)} similar genomes for Transformer"
@@ -765,6 +952,14 @@ async def predict_resistance(
                     else:
                         tr_conf = 0.5
                         tr_probs_dict = {'S': 0.33, 'I': 0.33, 'R': 0.34}
+                    if similar_genomes:
+                        tr_conf, tr_probs_dict = _adjust_confidence_with_similarity(
+                            antibiotic,
+                            tr_label,
+                            tr_conf,
+                            tr_probs_dict,
+                            similar_genomes,
+                        )
                     tr_entry = {
                         'prediction': tr_label,
                         'confidence': tr_conf,
@@ -1041,6 +1236,8 @@ async def predict_resistance(
                         query_embedding,
                         top_k=5
                     )
+                    # Re-rank using header/filename hints
+                    similar_genomes = _rerank_similar_genomes(similar_genomes, query_hints)
                     similarity_search_successful = True
                     logger.info(f"Found {len(similar_genomes)} similar genomes")
             except Exception as e:
@@ -1120,22 +1317,13 @@ async def predict_resistance(
                 
                 # For Transformer: Enhance confidence based on similarity search
                 if is_transformer and similar_genomes:
-                    # If similar genomes have matching resistance profiles, increase confidence
-                    similar_resistance_matches = 0
-                    for similar in similar_genomes[:3]:  # Check top 3
-                        metadata = similar.get('metadata', {})
-                        resistance_profile = metadata.get('resistance_profile', {})
-                        if antibiotic in resistance_profile:
-                            similar_phenotype = resistance_profile[antibiotic]
-                            if (similar_phenotype == 'R' and pred_label == 'R') or \
-                               (similar_phenotype == 'S' and pred_label == 'S') or \
-                               (similar_phenotype == 'I' and pred_label == 'I'):
-                                similar_resistance_matches += 1
-                    
-                    # Boost confidence if similar genomes agree
-                    if similar_resistance_matches >= 2:
-                        confidence = min(0.95, confidence + 0.1)
-                        logger.info(f"Boosted confidence for {antibiotic} based on similar genomes")
+                    confidence, class_probs = _adjust_confidence_with_similarity(
+                        antibiotic,
+                        pred_label,
+                        confidence,
+                        class_probs,
+                        similar_genomes,
+                    )
                 
                 xgb_markers = xgb_markers_by_ab.get(antibiotic, [])
                 tr_markers = tr_markers_by_ab.get(antibiotic, [])

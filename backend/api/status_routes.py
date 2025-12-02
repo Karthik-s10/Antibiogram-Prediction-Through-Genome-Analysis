@@ -73,6 +73,10 @@ async def list_all_jobs():
                 "created_at": job.created_at.isoformat(),
                 "pinned": getattr(job, "pinned", False),
                 "metadata": job.metadata,
+                # Expose full metrics for pinned jobs so the frontend can render
+                # rich visualizations (e.g., per-antibiotic heatmaps) without
+                # requiring an extra status fetch for each pinned card.
+                "metrics": job.metrics if getattr(job, "pinned", False) else None,
             }
             for job_id, job in sorted_jobs
         ]

@@ -6,6 +6,8 @@ import Home from "./components/home";
 import routes from "tempo-routes";
 
 function App() {
+  const tempoElements = useRoutes(routes);
+
   return (
     <div className="relative min-h-screen">
       <WavyBackground
@@ -22,7 +24,7 @@ function App() {
             <Routes>
               <Route path="/" element={<Home />} />
             </Routes>
-            {import.meta.env.VITE_TEMPO === "true" && useRoutes(routes)}
+            {import.meta.env.VITE_TEMPO === "true" && tempoElements}
           </>
         </Suspense>
       </div>

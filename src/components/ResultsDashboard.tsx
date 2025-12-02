@@ -219,6 +219,28 @@ const ResultsDashboard = ({
 
                   const riskScore = getResistanceRisk(prediction);
 
+                  const sourceLabel: string | undefined = (() => {
+                    if (ensemble) {
+                      const hasTransformer = !!ensemble.transformer;
+                      const hasXgboost = !!ensemble.xgboost;
+
+                      if (hasTransformer && hasXgboost) return "Source: Transformer + XGBoost";
+                      if (hasTransformer) return "Source: Transformer only";
+                      if (hasXgboost) return "Source: XGBoost only";
+                      return undefined;
+                    }
+
+                    const modelUsed = analysisSummary?.modelUsed as string | undefined;
+                    if (modelUsed) {
+                      const lower = modelUsed.toLowerCase();
+                      if (lower.includes("ensemble")) return "Source: Transformer + XGBoost";
+                      if (lower.includes("transformer")) return "Source: Transformer only";
+                      if (lower.includes("xgboost")) return "Source: XGBoost only";
+                    }
+
+                    return undefined;
+                  })();
+
                   const transformerPrediction =
                     ensemble?.transformer?.prediction ?? null;
                   const xgboostPrediction =
@@ -238,6 +260,11 @@ const ResultsDashboard = ({
                           <h3 className="font-medium text-lg">
                             {prediction.antibiotic}
                           </h3>
+                          {sourceLabel && (
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              {sourceLabel}
+                            </p>
+                          )}
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger asChild>
@@ -391,25 +418,39 @@ const ResultsDashboard = ({
 
               <div className="mt-8 p-4 bg-gray-50 rounded-lg">
                 <h3 className="font-medium mb-2">Legend</h3>
-                <div className="flex gap-4">
+                <div className="flex flex-col gap-2 text-sm text-gray-700">
                   <div className="flex items-center">
                     <Badge className="bg-green-100 text-green-800 border-green-300 mr-2">
                       S
                     </Badge>
-                    <span>Susceptible - Antibiotic likely effective</span>
+                    <span>
+                      <span className="font-medium">Susceptible</span> – Antibiotic likely effective. Greener badges
+                      indicate lower predicted resistance risk.
+                    </span>
                   </div>
                   <div className="flex items-center">
                     <Badge className="bg-yellow-100 text-yellow-800 border-yellow-300 mr-2">
                       I
                     </Badge>
-                    <span>Intermediate - Limited effectiveness</span>
+                    <span>
+                      <span className="font-medium">Intermediate</span> – Limited effectiveness when the model
+                      explicitly predicts I.
+                    </span>
                   </div>
                   <div className="flex items-center">
                     <Badge className="bg-red-100 text-red-800 border-red-300 mr-2">
                       R
                     </Badge>
-                    <span>Resistant - Antibiotic likely ineffective</span>
+                    <span>
+                      <span className="font-medium">Resistant</span> – Antibiotic likely ineffective. More
+                      orange/red badges indicate higher predicted resistance risk.
+                    </span>
                   </div>
+                  <p className="text-xs text-gray-600 mt-1">
+                    Note: The color of each antibiotic card reflects a continuous resistance
+                    risk score (from low/green to high/red), so some S or R predictions may
+                    appear yellow/orange when the model is uncertain or borderline.
+                  </p>
                 </div>
               </div>
             </TabsContent>

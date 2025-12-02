@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { listJobs, pinJob, unpinJob, clearUnpinnedJobs, getJobStatus, getXGBoostExplainability, blastKmers, type JobStatus } from "@/services/apiClient";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Clock, Pin, PinOff, History, Trash2 } from "lucide-react";
+import { Clock, Pin, PinOff, History, Trash2, BarChart3 } from "lucide-react";
 
 interface TrainingHistoryProps {
   onSelectJob?: (jobId: string, jobType: string) => void;
@@ -27,6 +27,7 @@ const TrainingHistory: React.FC<TrainingHistoryProps> = ({ onSelectJob }) => {
   const [isLoadingExplain, setIsLoadingExplain] = useState(false);
   const [blastResults, setBlastResults] = useState<Record<string, any[]>>({});
   const [isRunningBlast, setIsRunningBlast] = useState(false);
+  const [showPinnedMiniVisuals, setShowPinnedMiniVisuals] = useState(true);
 
   const loadJobs = async () => {
     try {
@@ -203,16 +204,29 @@ const TrainingHistory: React.FC<TrainingHistoryProps> = ({ onSelectJob }) => {
           <History className="h-5 w-5 text-slate-700" />
           <h2 className="text-lg font-semibold text-slate-800">Training History</h2>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleClearUnpinned}
-          disabled={isClearing || isLoading || sortedJobs.length === 0}
-          className="flex items-center gap-2"
-        >
-          <Trash2 className="h-4 w-4" />
-          {isClearing ? "Clearing..." : "Clear Unpinned"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant={showPinnedMiniVisuals ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowPinnedMiniVisuals((prev) => !prev)}
+            className="flex items-center gap-2"
+          >
+            <BarChart3 className="h-4 w-4" />
+            <span className="text-xs">
+              {showPinnedMiniVisuals ? "Hide mini visuals" : "Show mini visuals for pinned runs"}
+            </span>
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleClearUnpinned}
+            disabled={isClearing || isLoading || sortedJobs.length === 0}
+            className="flex items-center gap-2"
+          >
+            <Trash2 className="h-4 w-4" />
+            {isClearing ? "Clearing..." : "Clear Unpinned"}
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -256,7 +270,7 @@ const TrainingHistory: React.FC<TrainingHistoryProps> = ({ onSelectJob }) => {
                 </span>
                 <Button
                   variant="outline"
-                  size="xs"
+                  size="sm"
                   disabled={isRunningBlast}
                   onClick={runBlastForTopKmers}
                 >
@@ -354,6 +368,127 @@ const TrainingHistory: React.FC<TrainingHistoryProps> = ({ onSelectJob }) => {
           const modelName = (job as any).metadata?.model_name || jobId;
           const isCompared = compareSelection.includes(jobId);
 
+          const metrics: any = (job as any).metrics || {};
+          const perMetrics: any = metrics.per_antibiotic_metrics || {};
+          const hasPerMetrics =
+            pinned &&
+            status === "completed" &&
+            perMetrics &&
+            Object.keys(perMetrics).length > 0;
+
+          let miniHeatmap: React.ReactNode = null;
+
+          if (showPinnedMiniVisuals && hasPerMetrics) {
+            const antibiotics = Object.keys(perMetrics).sort();
+            if (antibiotics.length > 0) {
+              const classDefs = [
+                { key: "0", label: "S", name: "Susceptible", rgb: "34,197,94" },
+                { key: "1", label: "I", name: "Intermediate", rgb: "245,158,11" },
+                { key: "2", label: "R", name: "Resistant", rgb: "239,68,68" },
+              ];
+
+              let maxSupport = 0;
+              antibiotics.forEach((ab) => {
+                const m = perMetrics[ab] || {};
+                const perClass = m.per_class || {};
+                classDefs.forEach(({ key }) => {
+                  const cls = perClass[key] || {};
+                  const support = typeof cls["support"] === "number" ? (cls["support"] as number) : 0;
+                  if (support > maxSupport) maxSupport = support;
+                });
+              });
+              if (maxSupport <= 0) maxSupport = 1;
+
+              // Prepare tiny F1 (macro) sparkline data per antibiotic
+              const f1Values: number[] = [];
+              let maxF1 = 0;
+              antibiotics.forEach((ab) => {
+                const m = perMetrics[ab] || {};
+                const f1 = typeof m.f1_macro === "number" ? (m.f1_macro as number) : 0;
+                f1Values.push(f1);
+                if (f1 > maxF1) maxF1 = f1;
+              });
+              if (maxF1 <= 0) maxF1 = 1;
+
+              const sparkWidth = 120;
+              const sparkHeight = 24;
+              const sparkPadding = 3;
+              const denom = Math.max(antibiotics.length - 1, 1);
+              const sparkPoints = antibiotics
+                .map((ab, idx) => {
+                  const vRaw = f1Values[idx] ?? 0;
+                  const v = Math.max(0, vRaw);
+                  const x = (idx / denom) * (sparkWidth - sparkPadding * 2) + sparkPadding;
+                  const y =
+                    (sparkHeight - sparkPadding) - (v / maxF1) * (sparkHeight - sparkPadding * 2);
+                  return `${x},${y}`;
+                })
+                .join(" ");
+
+              miniHeatmap = (
+                <div className="mt-2 space-y-1">
+                  <div className="flex items-center justify-between text-[10px] text-slate-500">
+                    <span className="truncate">Class distribution (S/I/R)</span>
+                    <div className="flex gap-2">
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block w-3 h-3 rounded-[2px] bg-emerald-400" /> S
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block w-3 h-3 rounded-[2px] bg-amber-400" /> I
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <span className="inline-block w-3 h-3 rounded-[2px] bg-rose-400" /> R
+                      </span>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <div className="flex gap-[3px] py-1">
+                      {antibiotics.map((ab) => {
+                        const m = perMetrics[ab] || {};
+                        const perClass = m.per_class || {};
+                        return (
+                          <div key={ab} className="flex flex-col gap-[2px] items-stretch">
+                            {classDefs.map((cls) => {
+                              const cData = (perClass && perClass[cls.key]) || {};
+                              const support =
+                                typeof cData["support"] === "number" ? (cData["support"] as number) : 0;
+                              const intensity = maxSupport > 0 ? support / maxSupport : 0;
+                              const alpha = 0.15 + 0.8 * intensity;
+                              const bgColor = `rgba(${cls.rgb}, ${alpha.toFixed(3)})`;
+                              return (
+                                <div
+                                  key={`${ab}-${cls.key}`}
+                                  className="w-3 h-2.5 rounded-[2px]"
+                                  style={{ backgroundColor: bgColor }}
+                                  title={`${ab} · ${cls.name} · samples=${support}`}
+                                />
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {/* Tiny F1 macro sparkline */}
+                  <div className="mt-1 flex items-center gap-2 text-[10px] text-slate-500">
+                    <span className="whitespace-nowrap">F1 (macro)</span>
+                    <svg
+                      viewBox={`0 0 ${sparkWidth} ${sparkHeight}`}
+                      className="h-4 flex-1 text-slate-400"
+                    >
+                      <polyline
+                        points={sparkPoints}
+                        fill="none"
+                        stroke="#3b82f6"
+                        strokeWidth={1.5}
+                      />
+                    </svg>
+                  </div>
+                </div>
+              );
+            }
+          }
+
           return (
             <Card
               key={jobId}
@@ -429,11 +564,12 @@ const TrainingHistory: React.FC<TrainingHistoryProps> = ({ onSelectJob }) => {
                   <span>{job.progress ?? 0}%</span>
                 </div>
                 <Progress value={job.progress ?? 0} className="h-2" />
+                {miniHeatmap}
                 {status === "completed" && jobType === "xgboost" && (
                   <div className="mt-2 flex justify-end">
                     <Button
                       variant="outline"
-                      size="xs"
+                      size="sm"
                       onClick={(e) => {
                         e.stopPropagation();
                         openExplainability(jobId);

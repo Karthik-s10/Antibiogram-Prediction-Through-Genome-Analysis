@@ -1120,7 +1120,9 @@ const NCBIGenomeSearch = ({
 
   // Function to search for genomes by query using NCBI Datasets API
   const searchGenomesByQuery = async (query: string) => {
-    if (!query || query.trim() === "") {
+    const trimmedQuery = query.trim();
+
+    if (!trimmedQuery) {
       setError("Please enter a search term");
       return;
     }
@@ -1130,28 +1132,24 @@ const NCBIGenomeSearch = ({
 
     try {
       if (DEBUG_MODE) {
-        console.log(`Searching for: "${query}"`);
+        console.log(`Searching for: "${trimmedQuery}"`);
       }
 
-      // Check if the query looks like a GCF ID (NCBI RefSeq assembly accession)
-      const isGcfId = /^GCF_\d+\.\d+$/i.test(query.trim());
+      // Detect if the query looks like an assembly accession (RefSeq GCF_* or GenBank GCA_*)
+      const isAssemblyAccession = /^(GCF|GCA)_\d+(\.\d+)?$/i.test(trimmedQuery);
+      const isRefSeqAccession = /^GCF_/i.test(trimmedQuery);
 
       // Using NCBI Datasets API for search with POST request and JSON body
-      const searchRequestData = isGcfId
+      const searchRequestData = isAssemblyAccession
         ? {
-            // For accession-based search
-            accessions: [query.trim()],
-            filters: {
-              source_database: ["RefSeq"],
-              exclude_paired_reports: true,
-              exclude_atypical: true,
-            },
+            // Exact accession-based search (supports both RefSeq GCF_* and GenBank GCA_*)
+            // Rely on Datasets to resolve the accession without additional filters
+            accessions: [trimmedQuery.toUpperCase()],
             returned_content: "COMPLETE",
-            page_size: 20,
           }
         : {
-            // For taxonomic search by species name
-            taxons: [query],
+            // For taxonomic search by species/organism name
+            taxons: [trimmedQuery],
             filters: {
               source_database: ["RefSeq"],
               assembly_level: ["Complete Genome"],
@@ -1347,8 +1345,11 @@ const NCBIGenomeSearch = ({
       setSelectedTaxonomy("all");
       // Don't reset advanced filters: setShowAdvancedFilters(false);
 
-      // If we found exactly one genome that matches a GCF ID, select it automatically
-      if (validGenomes.length === 1 && /^GCF_\d+\.\d+$/i.test(query.trim())) {
+      // If we found exactly one genome that matches a specific accession ID, select it automatically
+      if (
+        validGenomes.length === 1 &&
+        /^(GCF|GCA)_\d+(\.\d+)?$/i.test(trimmedQuery)
+      ) {
         setSelectedGenomes(new Set([validGenomes[0].id]));
       }
     } catch (error: any) {

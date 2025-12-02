@@ -253,8 +253,266 @@ const TrainingStatus = ({ jobId, modelType, onComplete, onNewTraining }: Trainin
                 </Card>
               </div>
 
+              {/* Detailed per-antibiotic visuals: heatmap + per-class F1 line chart */}
+              {status.metrics.per_antibiotic_metrics && (() => {
+                const perMetrics: any = status.metrics.per_antibiotic_metrics;
+                const antibiotics = Object.keys(perMetrics).sort();
+                if (antibiotics.length === 0) return null;
+
+                const classDefs = [
+                  { key: "0", label: "S", name: "Susceptible", rgb: "34,197,94", colorClass: "text-emerald-400" },
+                  { key: "1", label: "I", name: "Intermediate", rgb: "245,158,11", colorClass: "text-amber-400" },
+                  { key: "2", label: "R", name: "Resistant", rgb: "239,68,68", colorClass: "text-rose-400" },
+                ];
+
+                let maxSupport = 0;
+                let maxF1 = 0;
+
+                antibiotics.forEach((ab) => {
+                  const m = perMetrics[ab] || {};
+                  const perClass = m.per_class || {};
+                  classDefs.forEach(({ key }) => {
+                    const cls = perClass[key] || {};
+                    const support = typeof cls["support"] === "number" ? cls["support"] : 0;
+                    const f1 = typeof cls["f1-score"] === "number" ? cls["f1-score"] : 0;
+                    if (support > maxSupport) maxSupport = support;
+                    if (f1 > maxF1) maxF1 = f1;
+                  });
+                });
+
+                if (maxSupport <= 0) maxSupport = 1;
+                if (maxF1 <= 0) maxF1 = 1;
+
+                const width = Math.max(antibiotics.length * 30 + 80, 360);
+                const height = 220;
+                const marginLeft = 50;
+                const marginRight = 16;
+                const marginTop = 24;
+                const marginBottom = 40;
+                const plotWidth = width - marginLeft - marginRight;
+                const plotHeight = height - marginTop - marginBottom;
+                const stepX = antibiotics.length > 1 ? plotWidth / (antibiotics.length - 1) : 0;
+
+                const buildLinePoints = (classKey: string) => {
+                  const pts: string[] = [];
+                  antibiotics.forEach((ab, idx) => {
+                    const m = perMetrics[ab] || {};
+                    const perClass = m.per_class || {};
+                    const cls = perClass[classKey] || {};
+                    const vRaw = typeof cls["f1-score"] === "number" ? cls["f1-score"] : 0;
+                    const v = Math.max(0, vRaw);
+                    const x = marginLeft + (antibiotics.length > 1 ? idx * stepX : plotWidth / 2);
+                    const y = marginTop + (1 - v / maxF1) * plotHeight;
+                    pts.push(`${x},${y}`);
+                  });
+                  return pts.join(" ");
+                };
+
+                return (
+                  <div className="space-y-6 mt-4">
+                    {/* Class distribution heatmap */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <BarChart3 className="h-5 w-5 text-slate-700" />
+                          <h3 className="font-semibold text-sm">Class Distribution Heatmap (per antibiotic)</h3>
+                        </div>
+                        <div className="flex gap-3 text-[11px] text-slate-500">
+                          {classDefs.map((c) => (
+                            <span key={c.key} className="flex items-center gap-1">
+                              <span
+                                className="inline-block w-3 h-3 rounded-sm"
+                                style={{ backgroundColor: `rgb(${c.rgb})` }}
+                              />
+                              <span className={c.colorClass}>{c.label}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="border rounded-lg bg-slate-950/95 text-xs text-slate-100 overflow-auto">
+                        <div
+                          className="grid min-w-full"
+                          style={{
+                            gridTemplateColumns: `80px repeat(${antibiotics.length}, minmax(28px,1fr))`,
+                          }}
+                        >
+                          {/* Header row */}
+                          <div className="border-b border-slate-800 bg-slate-900/80 flex items-center justify-center text-[10px] uppercase tracking-wide">
+                            Class
+                          </div>
+                          {antibiotics.map((ab) => (
+                            <div
+                              key={`header-${ab}`}
+                              className="border-b border-slate-800 bg-slate-900/80 px-2 py-1 text-[10px] text-center truncate"
+                              title={ab}
+                            >
+                              {ab}
+                            </div>
+                          ))}
+
+                          {/* Rows: S/I/R */}
+                          {classDefs.map((cls) => (
+                            <React.Fragment key={cls.key}>
+                              <div className="border-b border-slate-800 bg-slate-900/70 px-2 py-1 flex items-center gap-2">
+                                <span className={`text-[11px] font-semibold ${cls.colorClass}`}>{cls.label}</span>
+                                <span className="text-[10px] text-slate-400 truncate">{cls.name}</span>
+                              </div>
+                              {antibiotics.map((ab) => {
+                                const m = perMetrics[ab] || {};
+                                const perClass = m.per_class || {};
+                                const cData = perClass[cls.key] || {};
+                                const support =
+                                  typeof cData["support"] === "number" ? (cData["support"] as number) : 0;
+                                const intensity = maxSupport > 0 ? support / maxSupport : 0;
+                                const alpha = 0.12 + 0.78 * intensity;
+                                const bgColor = `rgba(${cls.rgb}, ${alpha.toFixed(3)})`;
+                                return (
+                                  <div
+                                    key={`${cls.key}-${ab}`}
+                                    className="border-b border-slate-900/60 border-r border-slate-900/40 h-7 flex items-center justify-center text-[10px]"
+                                    style={{ backgroundColor: bgColor }}
+                                    title={`${ab} · ${cls.name} · samples=${support}`}
+                                  >
+                                    {support > 0 ? support : ""}
+                                  </div>
+                                );
+                              })}
+                            </React.Fragment>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Per-class F1 line chart */}
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <TrendingUp className="h-5 w-5 text-slate-700" />
+                          <h3 className="font-semibold text-sm">Per-class F1 by antibiotic</h3>
+                        </div>
+                        <div className="flex gap-3 text-[11px] text-slate-500">
+                          <span className="flex items-center gap-1">
+                            <span className="inline-block w-4 h-0.5 rounded-full bg-emerald-400" /> S
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="inline-block w-4 h-0.5 rounded-full bg-amber-400" /> I
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <span className="inline-block w-4 h-0.5 rounded-full bg-rose-400" /> R
+                          </span>
+                        </div>
+                      </div>
+                      <div className="bg-slate-950/95 border border-slate-800 rounded-lg p-3">
+                        <svg
+                          viewBox={`0 0 ${width} ${height}`}
+                          className="w-full h-56 text-[10px] text-slate-400"
+                        >
+                          {/* Y-axis grid lines */}
+                          {[0, 0.25, 0.5, 0.75, 1].map((t) => {
+                            const y = marginTop + (1 - t) * plotHeight;
+                            return (
+                              <g key={`grid-${t}`}>
+                                <line
+                                  x1={marginLeft}
+                                  x2={width - marginRight}
+                                  y1={y}
+                                  y2={y}
+                                  stroke="rgba(148, 163, 184, 0.3)"
+                                  strokeWidth={0.5}
+                                  strokeDasharray="2 3"
+                                />
+                                <text x={8} y={y + 3} fill="#94a3b8">
+                                  {(t * maxF1).toFixed(2)}
+                                </text>
+                              </g>
+                            );
+                          })}
+
+                          {/* X-axis antibiotic labels */}
+                          {antibiotics.map((ab, idx) => {
+                            const x = marginLeft + (antibiotics.length > 1 ? idx * stepX : plotWidth / 2);
+                            return (
+                              <g key={`x-${ab}`}>
+                                <line
+                                  x1={x}
+                                  x2={x}
+                                  y1={marginTop + plotHeight}
+                                  y2={marginTop + plotHeight + 4}
+                                  stroke="#64748b"
+                                  strokeWidth={0.5}
+                                />
+                                <text
+                                  x={x}
+                                  y={height - 4}
+                                  textAnchor="middle"
+                                  fill="#94a3b8"
+                                  transform={`rotate(-35 ${x} ${height - 4})`}
+                                >
+                                  {ab}
+                                </text>
+                              </g>
+                            );
+                          })}
+
+                          {/* Lines per class */}
+                          <polyline
+                            points={buildLinePoints("0")}
+                            fill="none"
+                            stroke="#22c55e"
+                            strokeWidth={2}
+                          />
+                          <polyline
+                            points={buildLinePoints("1")}
+                            fill="none"
+                            stroke="#fbbf24"
+                            strokeWidth={2}
+                          />
+                          <polyline
+                            points={buildLinePoints("2")}
+                            fill="none"
+                            stroke="#fb7185"
+                            strokeWidth={2}
+                          />
+
+                          {/* Points */}
+                          {classDefs.map((cls) => (
+                            <React.Fragment key={`pts-${cls.key}`}>
+                              {antibiotics.map((ab, idx) => {
+                                const m = perMetrics[ab] || {};
+                                const perClass = m.per_class || {};
+                                const cData = perClass[cls.key] || {};
+                                const vRaw =
+                                  typeof cData["f1-score"] === "number" ? (cData["f1-score"] as number) : 0;
+                                const v = Math.max(0, vRaw);
+                                const x = marginLeft + (antibiotics.length > 1 ? idx * stepX : plotWidth / 2);
+                                const y = marginTop + (1 - v / maxF1) * plotHeight;
+                                return (
+                                  <circle
+                                    key={`${cls.key}-${ab}`}
+                                    cx={x}
+                                    cy={y}
+                                    r={2.5}
+                                    fill={
+                                      cls.key === "0"
+                                        ? "#22c55e"
+                                        : cls.key === "1"
+                                        ? "#fbbf24"
+                                        : "#fb7185"
+                                    }
+                                  />
+                                );
+                              })}
+                            </React.Fragment>
+                          ))}
+                        </svg>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {status.metrics.per_antibiotic_metrics && (
-                <div className="space-y-3">
+                <div className="space-y-3 mt-4">
                   <div className="flex items-center gap-2 mb-1">
                     <BarChart3 className="h-5 w-5" />
                     <h3 className="font-semibold text-sm">Performance Overview (per antibiotic)</h3>
