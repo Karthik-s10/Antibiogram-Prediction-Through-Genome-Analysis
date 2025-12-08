@@ -321,7 +321,7 @@ const HomePage = () => {
                 <TabsTrigger value="training">
                   Model Training
                 </TabsTrigger>
-                <TabsTrigger value="training-status" disabled={!trainingJob}>
+                <TabsTrigger value="training-status">
                   Training Status
                 </TabsTrigger>
               </TabsList>

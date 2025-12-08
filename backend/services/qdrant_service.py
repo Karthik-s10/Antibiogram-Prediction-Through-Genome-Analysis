@@ -5,6 +5,7 @@ Manages vector embeddings and similarity queries.
 from typing import List, Dict, Any, Optional
 import numpy as np
 import logging
+import hashlib
 
 try:
     from qdrant_client import QdrantClient
@@ -15,7 +16,13 @@ except ImportError:
     logger = logging.getLogger(__name__)
     logger.warning("Qdrant client not installed. Vector search will not be available.")
 
-from config import settings
+# Support both execution styles:
+# - Running from backend/ directory: `config` is a top-level module.
+# - Running as a package: `backend.config` is the module.
+try:  # type: ignore[import]
+    from config import settings  # when working directory is backend/
+except ImportError:  # pragma: no cover - fallback for package import
+    from backend.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +56,17 @@ class QdrantService:
         except Exception as e:
             logger.error(f"Failed to connect to Qdrant: {e}")
             self.client = None
+
+    @staticmethod
+    def _stable_point_id(genome_id: str) -> int:
+        """Return a deterministic integer ID for a genome_id string.
+
+        Uses SHA-256 and takes the first 8 bytes as an unsigned big-endian
+        integer. This is stable across processes and platforms, unlike
+        Python's built-in hash().
+        """
+        digest = hashlib.sha256(genome_id.encode("utf-8")).digest()
+        return int.from_bytes(digest[:8], "big", signed=False)
     
     def _ensure_collection(self):
         """Create collection if it doesn't exist."""
@@ -108,9 +126,9 @@ class QdrantService:
             payload = metadata or {}
             payload['genome_id'] = genome_id
             
-            # Insert point
+            # Insert point using a deterministic, stable ID derived from genome_id
             point = PointStruct(
-                id=hash(genome_id) & 0x7FFFFFFF,  # Positive integer ID
+                id=self._stable_point_id(genome_id),
                 vector=embedding.tolist(),
                 payload=payload
             )
@@ -149,9 +167,9 @@ class QdrantService:
             return 0
         
         if metadata_list is None:
-            metadata_list = [{}] * len(genome_ids)
+            metadata_list = [{} for _ in genome_ids]
         
-        points = []
+        points: List[PointStruct] = []
         for i, genome_id in enumerate(genome_ids):
             embedding = embeddings[i]
             metadata = metadata_list[i]
@@ -167,23 +185,38 @@ class QdrantService:
             payload['genome_id'] = genome_id
             
             point = PointStruct(
-                id=hash(genome_id) & 0x7FFFFFFF,
+                id=self._stable_point_id(genome_id),
                 vector=embedding.tolist(),
                 payload=payload
             )
             points.append(point)
         
-        try:
-            self.client.upsert(
-                collection_name=self.COLLECTION_NAME,
-                points=points
-            )
-            logger.info(f"Batch inserted {len(points)} embeddings")
-            return len(points)
-            
-        except Exception as e:
-            logger.error(f"Error in batch insert: {e}")
+        if not points:
             return 0
+
+        max_points_per_batch = 200
+        total_inserted = 0
+
+        for start in range(0, len(points), max_points_per_batch):
+            batch = points[start:start + max_points_per_batch]
+            try:
+                self.client.upsert(
+                    collection_name=self.COLLECTION_NAME,
+                    points=batch
+                )
+                total_inserted += len(batch)
+                logger.info(
+                    f"Batch inserted {len(batch)} embeddings "
+                    f"(total inserted so far: {total_inserted})"
+                )
+            except Exception as e:
+                logger.error(
+                    f"Error in batch insert for points {start}-"
+                    f"{start + len(batch) - 1}: {e}"
+                )
+                continue
+
+        return total_inserted
     
     def search_similar_genomes(
         self,
@@ -257,7 +290,7 @@ class QdrantService:
             return False
         
         try:
-            point_id = hash(genome_id) & 0x7FFFFFFF
+            point_id = self._stable_point_id(genome_id)
             self.client.delete(
                 collection_name=self.COLLECTION_NAME,
                 points_selector=[point_id]
@@ -283,8 +316,8 @@ class QdrantService:
             return False
         
         try:
-            # Use the same ID scheme as insert_genome_embedding/delete_genome
-            point_id = hash(genome_id) & 0x7FFFFFFF
+            # Use the same deterministic ID scheme as insert_genome_embedding/delete_genome
+            point_id = self._stable_point_id(genome_id)
             results = self.client.retrieve(
                 collection_name=self.COLLECTION_NAME,
                 ids=[point_id]
@@ -292,6 +325,39 @@ class QdrantService:
             return len(results) > 0
         except Exception as e:
             logger.error(f"Failed to check if genome exists: {e}")
+            return False
+
+    def reset_collection(self) -> bool:
+        """Delete and recreate the bacterial_genomes collection.
+
+        This wipes all existing points so that a fresh set of embeddings can
+        be inserted. Safe to call multiple times; if the collection does not
+        exist, it will simply be created.
+        """
+        if not self.client:
+            logger.warning("Qdrant client not available; cannot reset collection")
+            return False
+
+        try:
+            # Delete existing collection if present
+            collections = self.client.get_collections().collections
+            collection_names = [c.name for c in collections]
+            if self.COLLECTION_NAME in collection_names:
+                self.client.delete_collection(self.COLLECTION_NAME)
+                logger.info(f"Deleted Qdrant collection: {self.COLLECTION_NAME}")
+
+            # Recreate collection with the standard configuration
+            self.client.create_collection(
+                collection_name=self.COLLECTION_NAME,
+                vectors_config=VectorParams(
+                    size=self.VECTOR_SIZE,
+                    distance=Distance.COSINE,
+                ),
+            )
+            logger.info(f"Re-created Qdrant collection: {self.COLLECTION_NAME}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to reset Qdrant collection: {e}")
             return False
     
     def get_collection_stats(self) -> Dict[str, Any]:

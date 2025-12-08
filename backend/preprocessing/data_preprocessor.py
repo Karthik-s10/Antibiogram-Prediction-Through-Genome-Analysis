@@ -12,6 +12,8 @@ from typing import Tuple, Dict, Optional, List, Set
 import logging
 from datetime import datetime
 
+from preprocessing.phenotype_parser import PhenotypeParser
+
 logger = logging.getLogger(__name__)
 
 
@@ -141,6 +143,12 @@ class DataPreprocessor:
             # Remove quotes from Genome ID and Antibiotic columns
             pheno_df['Genome ID'] = pheno_df['Genome ID'].str.strip().str.replace('"', '')
             pheno_df['Antibiotic'] = pheno_df['Antibiotic'].str.strip().str.replace('"', '')
+
+            # Normalize antibiotic names to match PhenotypeParser behavior
+            pheno_df['Antibiotic'] = pheno_df['Antibiotic'].str.lower()
+            pheno_df['Antibiotic'] = pheno_df['Antibiotic'].map(
+                PhenotypeParser.ANTIBIOTIC_NORMALIZATION_MAP
+            ).fillna(pheno_df['Antibiotic'])
             
             # Filter for Laboratory Method evidence only
             if 'Evidence' in pheno_df.columns:
@@ -429,7 +437,7 @@ class DataPreprocessor:
         kmer_file: str,
         use_cache: bool = True,
         save_cache: bool = True
-    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
         """
         Main preprocessing pipeline.
         
@@ -466,7 +474,16 @@ class DataPreprocessor:
                 logger.info(f"  - Genomes: {len(X_final)}")
                 logger.info(f"  - Features: {X_final.shape[1]}")
                 logger.info(f"  - Labels: {Y_final.shape[1]}")
-                return X_final, Y_final
+
+                data_summary = {
+                    'n_phenotype_records': None,
+                    'n_kmer_records': None,
+                    'n_phenotype_genomes': int(len(Y_final)),
+                    'n_kmer_genomes': int(len(X_final)),
+                    'n_aligned_genomes': int(len(X_final)),
+                }
+
+                return X_final, Y_final, data_summary
             except Exception as e:
                 logger.warning(f"Cache load failed: {e}. Proceeding with full preprocessing.")
         
@@ -475,23 +492,30 @@ class DataPreprocessor:
         
         # Step 2: Load and map phenotype data
         pheno_df = self.load_and_map_phenotypes(phenotype_file, id_mapping)
+        n_phenotype_records = len(pheno_df)
+        # Count unique genomes in phenotype after mapping (Assembly Accession index space)
+        n_phenotype_genomes = int(pheno_df['Assembly Accession'].nunique())
         
         # Step 3: Create label matrix
         Y = self.create_label_matrix(pheno_df)
         
         # Step 4: Load k-mer data
         kmer_df = self.load_kmer_data(kmer_file)
+        n_kmer_records = len(kmer_df)
+        total_kmer_genomes = int(kmer_df['Genome ID'].nunique())
         
         # Step 5: Create feature matrix (filter to genomes in Y for memory efficiency)
         target_genomes = set(Y.index)
         logger.info(f"Filtering k-mers to {len(target_genomes)} genomes from phenotype data")
         X = self.create_feature_matrix(kmer_df, target_genomes=target_genomes)
+        n_kmer_genomes_after_filter = int(len(X))
         
         # Free memory from kmer_df
         del kmer_df
         
         # Step 6: Align matrices
         X_final, Y_final = self.align_data(X, Y)
+        n_aligned_genomes = int(len(X_final))
         
         # Save to cache
         if save_cache:
@@ -507,8 +531,17 @@ class DataPreprocessor:
         logger.info("=" * 80)
         logger.info(f"Preprocessing complete in {elapsed:.2f} seconds")
         logger.info("=" * 80)
+
+        data_summary = {
+            'n_phenotype_records': int(n_phenotype_records),
+            'n_kmer_records': int(n_kmer_records),
+            'n_phenotype_genomes': int(n_phenotype_genomes),
+            'n_kmer_genomes': int(total_kmer_genomes),
+            'n_kmer_genomes_after_filter': int(n_kmer_genomes_after_filter),
+            'n_aligned_genomes': int(n_aligned_genomes),
+        }
         
-        return X_final, Y_final
+        return X_final, Y_final, data_summary
     
     def get_data_summary(self, X: pd.DataFrame, Y: pd.DataFrame) -> Dict:
         """

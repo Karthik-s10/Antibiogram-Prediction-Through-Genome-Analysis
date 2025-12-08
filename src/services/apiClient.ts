@@ -113,9 +113,8 @@ export async function trainXGBoost(
   if (options?.use_rosetta_preprocessor !== undefined) {
     formData.append('use_rosetta_preprocessor', String(options.use_rosetta_preprocessor));
   }
-  if (options?.max_genomes) formData.append('max_genomes', options.max_genomes.toString());
-  if (options?.cycle_index !== undefined) {
-    formData.append('cycle_index', options.cycle_index.toString());
+  if (options?.max_genomes !== undefined) {
+    formData.append('max_genomes', options.max_genomes.toString());
   }
   if (options?.cycle_index !== undefined) {
     formData.append('cycle_index', options.cycle_index.toString());
@@ -250,7 +249,12 @@ export async function trainTransformer(
   if (options?.use_rosetta_preprocessor !== undefined) {
     formData.append('use_rosetta_preprocessor', String(options.use_rosetta_preprocessor));
   }
-  if (options?.max_genomes) formData.append('max_genomes', options.max_genomes.toString());
+  if (options?.max_genomes !== undefined) {
+    formData.append('max_genomes', options.max_genomes.toString());
+  }
+  if (options?.cycle_index !== undefined) {
+    formData.append('cycle_index', options.cycle_index.toString());
+  }
   
   const response = await fetch(`${API_BASE_URL}/api/train/transformer`, {
     method: 'POST',
@@ -309,7 +313,12 @@ export async function trainParallel(
   if (options?.use_rosetta_preprocessor !== undefined) {
     formData.append('use_rosetta_preprocessor', String(options.use_rosetta_preprocessor));
   }
-  if (options?.max_genomes) formData.append('max_genomes', options.max_genomes.toString());
+  if (options?.max_genomes !== undefined) {
+    formData.append('max_genomes', options.max_genomes.toString());
+  }
+  if (options?.cycle_index !== undefined) {
+    formData.append('cycle_index', options.cycle_index.toString());
+  }
   
   const response = await fetch(`${API_BASE_URL}/api/train/parallel`, {
     method: 'POST',

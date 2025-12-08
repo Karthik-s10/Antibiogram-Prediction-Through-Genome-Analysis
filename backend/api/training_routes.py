@@ -30,8 +30,9 @@ async def train_xgboost(
     rosetta_file: Optional[UploadFile] = File(
         None,
         description=(
-            "Optional Rosetta mapping file (BVBRC_genome.txt). "
-            "If omitted, the backend will look for BVBRC_genome.txt on disk."
+            "Optional Rosetta mapping file (BVBRC_genome.txt) for legacy "
+            "assembly-based k-mer datasets. Not required when using the "
+            "new Taxon ID-based k-mer file."
         ),
     ),
     model_name: Optional[str] = Form(None),
@@ -39,23 +40,25 @@ async def train_xgboost(
     learning_rate: Optional[float] = Form(0.1),
     n_estimators: Optional[int] = Form(100),
     k: Optional[int] = Form(None, description="K-mer size (auto-detect if None)"),
-    use_rosetta_preprocessor: Optional[bool] = Form(True),
+    use_rosetta_preprocessor: Optional[bool] = Form(
+        False,
+        description=(
+            "If True, use Rosetta-based preprocessing (BVBRC_genome.txt) to "
+            "map Genome IDs to Assembly Accessions. Leave False when using "
+            "Taxon ID-based k-mer files (recommended)."
+        ),
+    ),
     max_genomes: Optional[int] = Form(1000, description="Max genomes per training cycle to limit memory usage"),
     cycle_index: Optional[int] = Form(0, description="Which genome chunk to train on (0 for first chunk, 1 for second, ...)."),
 ):
-    """
-    Train an XGBoost model for antibiotic resistance prediction.
-    
-    Args:
-        kmer_file: K-mer frequency data (TSV format)
-        phenotype_file: Phenotype labels (CSV format)
-        model_name: Optional custom model name
-        max_depth: XGBoost max tree depth
-        learning_rate: XGBoost learning rate
-        n_estimators: Number of boosting rounds
-    
-    Returns:
-        job_id: Unique identifier for tracking training progress
+    """Train an XGBoost model for antibiotic resistance prediction.
+
+    By default, this route uses the in-memory Taxon ID-based pipeline:
+    - K-mer file: taxon_id, domain, k, kmer_sequence, probability
+    - Phenotype file: BVBRC_genome_amr.txt (using Taxon ID as genome_id)
+
+    Set use_rosetta_preprocessor=True only when training on legacy k-mer
+    datasets keyed by Assembly Accession and providing BVBRC_genome.txt.
     """
     # Validate files are provided (no extension check - accept any file)
     if not kmer_file.filename:
@@ -175,8 +178,10 @@ async def train_transformer(
     rosetta_file: Optional[UploadFile] = File(
         None,
         description=(
-            "Optional Rosetta mapping file (BVBRC_genome.txt). "
-            "If omitted and use_rosetta_preprocessor is True, the backend will look for "
+            "Optional Rosetta mapping file (BVBRC_genome.txt) for legacy "
+            "assembly-based k-mer datasets. Not required when using the "
+            "new Taxon ID-based k-mer file. If omitted and "
+            "use_rosetta_preprocessor is True, the backend will look for "
             "BVBRC_genome.txt on disk."
         ),
     ),
@@ -185,7 +190,14 @@ async def train_transformer(
     batch_size: Optional[int] = Form(16),
     learning_rate: Optional[float] = Form(2e-5),
     k: Optional[int] = Form(None, description="K-mer size (auto-detect if None)"),
-    use_rosetta_preprocessor: Optional[bool] = Form(True),
+    use_rosetta_preprocessor: Optional[bool] = Form(
+        False,
+        description=(
+            "If True, use Rosetta-based preprocessing (BVBRC_genome.txt) to map "
+            "phenotype Genome IDs to Assembly/GenBank accessions. Leave False "
+            "when using Taxon ID-based k-mer files (recommended)."
+        ),
+    ),
     max_genomes: Optional[int] = Form(1000, description="Max genomes per training cycle to limit memory usage"),
     cycle_index: Optional[int] = Form(0, description="Which genome chunk to train on (0 for first chunk, 1 for second, ...)."),
 ):
@@ -335,7 +347,14 @@ async def train_parallel(
     transformer_learning_rate: Optional[float] = Form(2e-5),
     # K-mer size
     k: Optional[int] = Form(None, description="K-mer size (auto-detect if None)"),
-    use_rosetta_preprocessor: Optional[bool] = Form(True),
+    use_rosetta_preprocessor: Optional[bool] = Form(
+        False,
+        description=(
+            "If True, use Rosetta-based preprocessing (BVBRC_genome.txt) for both "
+            "XGBoost and Transformer child jobs. Leave False when using Taxon "
+            "ID-based k-mer files (recommended)."
+        ),
+    ),
     max_genomes: Optional[int] = Form(1000, description="Max genomes per training cycle to limit memory usage"),
     cycle_index: Optional[int] = Form(0, description="Which genome chunk to train on (0 for first chunk, 1 for second, ...)."),
 ):

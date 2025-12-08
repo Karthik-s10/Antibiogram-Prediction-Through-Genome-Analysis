@@ -170,6 +170,38 @@ sparse_output = True  # Use sparse matrices
 
 ### K-mer File Format (Your Data)
 
+#### Recommended (Taxon ID-based, current pipeline)
+
+This is the format produced by `backend/generate_kmer/generate_kmers.py` when run with:
+
+```bash
+python generate_kmers.py \
+  --phenotype ../../DATA/BVBRC_genome_amr.txt \
+  --genomes-dir ncbi_genomes_by_taxon \
+  --output kmer_dataset_taxon_k10_p1e-5_all.txt \
+  --k 10 \
+  --id-type taxon \
+  --min-probability 1e-5
+```
+
+Output format (per line):
+
+```tsv
+taxon_id	Bacteria	10	KMER_SEQUENCE	probability
+903915	Bacteria	10	AAAAAAAAGC	1.55e-05
+903915	Bacteria	10	AAAAAAAATA	1.65e-05
+...
+```
+
+- **ID column**: Taxon ID (aligns directly with `Taxon ID` in `BVBRC_genome_amr.txt`)
+- **k**: `10`
+- **Probability threshold**: only k-mers with `probability >= 1e-5` are kept
+- Recommended file path for training: `backend/generate_kmer/kmer_dataset_taxon_k10_p1e-5_all.txt`
+
+#### Legacy (Assembly-based) Format
+
+Older pipelines may use Assembly Accessions (e.g. `GCA_000001.1`) and two probability columns:
+
 ```tsv
 GCA_000001.1	Bacteria	10	AAAAAAAAAA	0.001	0.005
 GCA_000001.1	Bacteria	10	AAAAAAAAAC	0.002	0.006
@@ -178,7 +210,9 @@ GCA_000001.1	Bacteria	10	AAAAAAAAAG	0.001	0.004
 GCA_200000.1	Bacteria	10	TTTTTTTTTT	0.003	0.007
 ```
 
-**Size**: Could be 10-100GB+ (millions of lines)
+The training backend now supports **both** formats, but the Taxon ID-based format above is recommended for new runs.
+
+**Size**: Either format can reach 10–100GB+ (millions of lines)
 
 ### Phenotype File Format
 

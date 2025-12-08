@@ -24,12 +24,39 @@ class PhenotypeParser:
         'Intermediate': 1,
         'I': 1,
         'Resistant': 2,
-        'R': 2
+        'R': 2,
+        # Additional BV-BRC style values
+        'Nonsusceptible': 2,
+        'Reduced Susceptibility': 1,
+        'Susceptible-dose dependent': 1,
     }
     
     def __init__(self):
         self.antibiotics: List[str] = []
         self.genome_ids: List[str] = []
+        
+    # Map obvious antibiotic spelling variants to canonical names
+    ANTIBIOTIC_NORMALIZATION_MAP: Dict[str, str] = {
+        'trimotheprim': 'trimethoprim',
+        'tigecyklin': 'tigecycline',
+        'tgecycline': 'tigecycline',
+        'strofurantoin': 'nitrofurantoin',
+        'phosphomycin': 'fosfomycin',
+        'cefuroximâ': 'cefuroxime',
+        'ceftarolin': 'ceftaroline',
+        'cefalexin': 'cephalexin',
+        'cefalotin': 'cephalothin',
+        'cefpirom': 'cefpirome',
+        'amoxicillin_clavulanat': 'amoxicillin/clavulanic acid',
+        'sulfamethoxazole/trimethoprim': 'trimethoprim/sulfamethoxazole',
+        # Additional variants seen in BV-BRC phenotype exports
+        'cefotaxime/clavulanic acidâ': 'cefotaxime/clavulanic acid',
+        'tetracyklin': 'tetracycline',
+        'aminogycosides': 'aminoglycosides',
+        'geamycin': 'gentamicin',
+        'trimethoprim_sulfonamide': 'trimethoprim/sulfonamide',
+        'sulphadimethoxine': 'sulfadimethoxine',
+    }
     
     def parse_phenotype_file(self, content: bytes) -> pd.DataFrame:
         """
@@ -129,8 +156,20 @@ class PhenotypeParser:
             # Standardize column names - remove extra whitespace and tabs
             df.columns = df.columns.str.strip().str.replace('\t', ' ')
             
-            # Find genome identifier column - expanded list with more variations
-            genome_cols = ['Genome ID', 'Genome Name', 'Genome', 'genome_id', 'genome', 'Genome', 'GenomeName', 'genome_name']
+            # Find genome identifier column - expanded list with more variations.
+            # Prefer Taxon ID when available so we can align directly with
+            # taxon-based k-mer files.
+            genome_cols = [
+                'Taxon ID',
+                'Genome ID',
+                'Genome Name',
+                'Genome',
+                'genome_id',
+                'genome',
+                'Genome',
+                'GenomeName',
+                'genome_name',
+            ]
             genome_col = None
             for col in genome_cols:
                 if col in df.columns:
@@ -175,6 +214,7 @@ class PhenotypeParser:
             # Clean data
             df['genome_id'] = df['genome_id'].astype(str).str.strip()
             df['antibiotic'] = df['antibiotic'].astype(str).str.strip().str.lower()
+            df['antibiotic'] = df['antibiotic'].map(self.ANTIBIOTIC_NORMALIZATION_MAP).fillna(df['antibiotic'])
             df['phenotype'] = df['phenotype'].astype(str).str.strip()
             
             # Remove any rows with missing values

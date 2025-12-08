@@ -233,15 +233,44 @@ class XGBoostTrainer:
             
             # Train/test split (on encoded labels). If the least populated class
             # has fewer than 2 samples, sklearn's stratified split will fail,
-            # so we fall back to a non-stratified split in that edge case.
+            # so we fall back to a non-stratified split in that edge case. We
+            # also guard against cases where the test set would end up with
+            # fewer samples than classes, which causes scikit-learn to raise
+            # "The test_size = 1 should be greater or equal to the number of
+            # classes = 2". In that situation we skip this antibiotic instead
+            # of failing the entire training job.
             unique_enc, counts_enc = np.unique(y_valid_enc, return_counts=True)
             min_count = counts_enc.min()
             use_stratify = len(unique_enc) > 1 and min_count >= 2
+
+            if use_stratify:
+                n_classes = len(unique_enc)
+                # train_test_split will compute the test set size as
+                # ceil(test_size * n_samples); mimic that here to detect
+                # problematic tiny test sets ahead of time.
+                estimated_n_test = int(np.ceil(0.2 * len(y_valid_enc)))
+                if estimated_n_test < n_classes:
+                    logger.warning(
+                        f"Skipping {antibiotic} for XGBoost training: "
+                        f"only {len(y_valid_enc)} samples available with "
+                        f"{n_classes} classes; a 20% test split would produce "
+                        f"only {estimated_n_test} test samples, which is fewer "
+                        f"than the number of classes."
+                    )
+                    metrics[antibiotic] = {
+                        "error": "insufficient_test_samples_for_stratified_split",
+                        "n_samples": int(len(y_valid)),
+                        "classes": [int(c) for c in unique],
+                        "estimated_n_test": int(estimated_n_test),
+                    }
+                    continue
+
             if not use_stratify:
                 logger.warning(
                     f"Not using stratified split for {antibiotic} because "
                     f"the least populated class has only {min_count} samples."
                 )
+
             X_train, X_test, y_train, y_test = train_test_split(
                 X_valid, y_valid_enc,
                 test_size=0.2,

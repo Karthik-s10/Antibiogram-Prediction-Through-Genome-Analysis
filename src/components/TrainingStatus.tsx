@@ -253,6 +253,57 @@ const TrainingStatus = ({ jobId, modelType, onComplete, onNewTraining }: Trainin
                 </Card>
               </div>
 
+              {/* Genome usage & chunking info */}
+              {typeof status.metrics.n_genomes === "number" && (
+                <div className="space-y-0.5 text-xs text-slate-600">
+                  <div>
+                    <span>
+                      Genomes used (after alignment)
+                      {typeof status.metrics.original_n_genomes === "number" &&
+                      status.metrics.original_n_genomes !== status.metrics.n_genomes
+                        ? `: ${status.metrics.n_genomes} / ${status.metrics.original_n_genomes}`
+                        : `: ${status.metrics.n_genomes}`}
+                    </span>
+                    {status.metrics.chunking_applied ? (
+                      <span className="ml-2 text-amber-600">
+                        (chunking enabled; max {status.metrics.max_genomes}, cycle {status.metrics.cycle_index})
+                      </span>
+                    ) : (
+                      <span className="ml-2 text-emerald-600">(no chunking)</span>
+                    )}
+                  </div>
+
+                  {(typeof status.metrics.n_phenotype_genomes === "number" ||
+                    typeof status.metrics.n_kmer_genomes === "number" ||
+                    typeof status.metrics.n_aligned_genomes === "number") && (
+                    <div className="text-[11px] text-slate-500">
+                      <span className="font-medium">Genome flow:</span>
+                      {typeof status.metrics.n_phenotype_genomes === "number" && (
+                        <span> phenotypes={status.metrics.n_phenotype_genomes}</span>
+                      )}
+                      {typeof status.metrics.n_kmer_genomes === "number" && (
+                        <span>
+                          {" "}· k-mers={status.metrics.n_kmer_genomes}
+                        </span>
+                      )}
+                      {typeof status.metrics.n_kmer_genomes_after_filter === "number" &&
+                        typeof status.metrics.n_kmer_genomes === "number" &&
+                        status.metrics.n_kmer_genomes_after_filter !==
+                          status.metrics.n_kmer_genomes && (
+                          <span>
+                            {" "}· k-mers (filtered)={status.metrics.n_kmer_genomes_after_filter}
+                          </span>
+                        )}
+                      {typeof status.metrics.n_aligned_genomes === "number" && (
+                        <span>
+                          {" "}· aligned={status.metrics.n_aligned_genomes}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Detailed per-antibiotic visuals: heatmap + per-class F1 line chart */}
               {status.metrics.per_antibiotic_metrics && (() => {
                 const perMetrics: any = status.metrics.per_antibiotic_metrics;
@@ -607,7 +658,19 @@ const TrainingStatus = ({ jobId, modelType, onComplete, onNewTraining }: Trainin
                                 )}
                               </TableCell>
                               <TableCell className="text-right text-gray-600">
-                                {metrics.n_train + metrics.n_test || 0}
+                                {(() => {
+                                  const hasTrain = typeof metrics.n_train === "number";
+                                  const hasTest = typeof metrics.n_test === "number";
+                                  if (hasTrain || hasTest) {
+                                    const train = hasTrain ? (metrics.n_train as number) : 0;
+                                    const test = hasTest ? (metrics.n_test as number) : 0;
+                                    return train + test;
+                                  }
+                                  if (typeof metrics.n_samples === "number") {
+                                    return metrics.n_samples as number;
+                                  }
+                                  return 0;
+                                })()}
                               </TableCell>
                             </TableRow>
                           )

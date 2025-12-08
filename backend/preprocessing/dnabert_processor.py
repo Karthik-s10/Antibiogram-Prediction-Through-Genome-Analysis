@@ -9,6 +9,7 @@ import logging
 from io import StringIO
 from Bio import SeqIO
 from collections import defaultdict
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ class DNABERTProcessor:
                 
                 # Limit to reasonable number of genes per genome
                 if genes_per_genome:
-                    genome_to_genes[genome_id] = genes_per_genome[:50]  # Max 50 genes per genome
+                    genome_to_genes[genome_id] = genes_per_genome[:30]  # Max 30 genes per genome
             
             logger.info(f"Extracted genes from {len(genome_to_genes)} genomes")
             logger.info(f"Average genes per genome: {np.mean([len(g) for g in genome_to_genes.values()]):.1f}")
@@ -162,6 +163,10 @@ class DNABERTProcessor:
         Returns:
             DataFrame with columns: genome_id, gene_sequence, antibiotic, resistance_label
         """
+        start_time = time.time()
+        total_genomes = len(genome_to_genes)
+        logger.info(f"Creating gene dataset from {total_genomes} genomes...")
+
         # Ensure phenotype_df has required columns
         if 'genome_id' not in phenotype_df.columns:
             # Try to infer genome_id column
@@ -174,16 +179,23 @@ class DNABERTProcessor:
             antibiotic_col = next((c for c in antibiotic_cols if c in phenotype_df.columns), None)
             if antibiotic_col:
                 phenotype_df = phenotype_df.rename(columns={antibiotic_col: 'antibiotic'})
+
+        logger.info("Indexing phenotype data by genome_id for fast lookup...")
+        pheno_by_genome = {gid: group for gid, group in phenotype_df.groupby('genome_id')}
+        logger.info(f"Indexed phenotypes for {len(pheno_by_genome)} genomes")
         
         # Create gene-level dataset
         gene_records = []
+        processed_with_pheno = 0
         
-        for genome_id, genes in genome_to_genes.items():
+        for idx, (genome_id, genes) in enumerate(genome_to_genes.items(), start=1):
             # Get phenotypes for this genome
-            genome_phenotypes = phenotype_df[phenotype_df['genome_id'] == genome_id]
+            genome_phenotypes = pheno_by_genome.get(genome_id)
             
-            if len(genome_phenotypes) == 0:
+            if genome_phenotypes is None or len(genome_phenotypes) == 0:
                 continue
+
+            processed_with_pheno += 1
             
             # For each gene, create entries for each antibiotic
             for gene_seq in genes:
@@ -207,10 +219,22 @@ class DNABERTProcessor:
                         'antibiotic': antibiotic,
                         'label': label
                     })
+
+            if idx % 10 == 0 or idx == total_genomes:
+                elapsed = time.time() - start_time
+                avg_per_genome = elapsed / idx if idx > 0 else 0.0
+                remaining = total_genomes - idx
+                eta = remaining * avg_per_genome
+                logger.info(
+                    f"[create_gene_dataset] Processed {idx}/{total_genomes} genomes "
+                    f"({processed_with_pheno} with phenotypes); "
+                    f"elapsed={elapsed/60:.1f} min, ETA={eta/60:.1f} min"
+                )
         
         gene_df = pd.DataFrame(gene_records)
+        total_elapsed = time.time() - start_time
         
-        logger.info(f"Created gene dataset with {len(gene_df)} entries")
+        logger.info(f"Created gene dataset with {len(gene_df)} entries in {total_elapsed/60:.1f} min")
         logger.info(f"Unique genomes: {gene_df['genome_id'].nunique()}")
         logger.info(f"Unique antibiotics: {gene_df['antibiotic'].nunique()}")
         logger.info(f"Label distribution: S={np.sum(gene_df['label']==0)}, "

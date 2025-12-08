@@ -36,7 +36,7 @@ const TrainingPipeline = ({ onJobCreated }: TrainingPipelineProps) => {
   const [maxGenomes, setMaxGenomes] = useState(1000);
   const [useAllGenomes, setUseAllGenomes] = useState(false);
   const [transformerLearningRate, setTransformerLearningRate] = useState(0.00002);
-  const [useRosetta, setUseRosetta] = useState(true);
+  const [useRosetta, setUseRosetta] = useState(false);
   const [cycleIndex, setCycleIndex] = useState(0);
 
   const handleKmerFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -428,7 +428,13 @@ const TrainingPipeline = ({ onJobCreated }: TrainingPipelineProps) => {
                       id="use-all-genomes"
                       type="checkbox"
                       checked={useAllGenomes}
-                      onChange={(e) => setUseAllGenomes(e.target.checked)}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setUseAllGenomes(checked);
+                        if (checked) {
+                          setCycleIndex(0);
+                        }
+                      }}
                       className="h-4 w-4"
                     />
                     <Label htmlFor="use-all-genomes" className="text-sm cursor-pointer">
@@ -443,8 +449,12 @@ const TrainingPipeline = ({ onJobCreated }: TrainingPipelineProps) => {
                     type="number"
                     min="0"
                     value={cycleIndex}
-                    onChange={(e) => setCycleIndex(parseInt(e.target.value) || 0)}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      setCycleIndex(Number.isNaN(val) ? 0 : Math.max(0, val));
+                    }}
                     className="mt-1 w-32"
+                    disabled={useAllGenomes}
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     Use different cycle indexes (0, 1, 2, ...) across runs to cover all genomes in deterministic chunks.

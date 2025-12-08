@@ -95,14 +95,40 @@ class KmerProcessor:
             
             # Decode content
             text_content = content.decode('utf-8')
-            
+
+            # Detect number of columns from first non-empty line to support both
+            # legacy 6-column format and new 5-column (single-probability) format.
+            lines = [ln for ln in text_content.split('\n') if ln.strip()]
+            if not lines:
+                raise ValueError("Empty k-mer file")
+            first_line = lines[0]
+            n_cols = len(first_line.split('\t'))
+
+            if n_cols == 5:
+                col_names = ['genome_id', 'domain', 'k', 'kmer_sequence', 'prob']
+            else:
+                col_names = ['genome_id', 'domain', 'k', 'kmer_sequence', 'prob1', 'prob2']
+
             # Read as tab-separated
             df = pd.read_csv(
                 StringIO(text_content),
                 sep='\t',
                 header=None,
-                names=['genome_id', 'domain', 'k', 'kmer_sequence', 'prob1', 'prob2']
+                names=col_names
             )
+
+            # Normalize probability columns so that downstream code can always use
+            # either prob2 (preferred) or a single 'prob' column.
+            if 'prob2' not in df.columns:
+                if 'prob' in df.columns:
+                    df['prob2'] = df['prob']
+                elif 'prob1' in df.columns:
+                    df['prob2'] = df['prob1']
+
+            # Ensure genome IDs are stored as strings for consistent alignment with
+            # phenotype data (which uses Taxon ID / Genome ID as strings).
+            if 'genome_id' in df.columns:
+                df['genome_id'] = df['genome_id'].astype(str).str.strip()
             
             # Filter by k-mer size if specified
             if 'k' in df.columns:
@@ -131,35 +157,64 @@ class KmerProcessor:
             - genome_ids: list of genome identifiers
             - feature_names: list of k-mer sequences
         """
+        import time
+        
+        t_start = time.time()
+        
         # Get unique genomes and k-mers
+        logger.info("Building feature matrix: extracting unique genomes...")
         genome_ids = sorted(kmer_df['genome_id'].unique())
-        kmer_sequences = sorted(kmer_df['kmer_sequence'].unique())
-        
-        # Use prob2 as the frequency/score (can be adjusted)
-        # Create a pivot table: rows=genomes, columns=kmers, values=frequency
-        kmer_dict = defaultdict(lambda: defaultdict(float))
-        
-        for _, row in kmer_df.iterrows():
-            genome = row['genome_id']
-            kmer = row['kmer_sequence']
-            freq = float(row['prob2'])  # Use prob2 as frequency
-            kmer_dict[genome][kmer] = freq
-        
-        # Build matrix
         n_genomes = len(genome_ids)
-        n_kmers = len(kmer_sequences)
+        logger.info(f"  Found {n_genomes:,} unique genomes")
         
+        logger.info("Building feature matrix: extracting unique k-mers...")
+        kmer_sequences = sorted(kmer_df['kmer_sequence'].unique())
+        n_kmers = len(kmer_sequences)
+        logger.info(f"  Found {n_kmers:,} unique k-mers")
+
+        # Choose probability column to use as the frequency/score.
+        if 'prob2' in kmer_df.columns:
+            value_col = 'prob2'
+        elif 'prob' in kmer_df.columns:
+            value_col = 'prob'
+        else:
+            value_col = 'prob1'
+        logger.info(f"  Using '{value_col}' as probability column")
+
+        # Use vectorized pivot instead of slow row-by-row iteration
+        logger.info("Building feature matrix: pivoting data (this may take a few minutes)...")
+        t_pivot = time.time()
+        
+        # Create genome and kmer index mappings for fast lookup
+        genome_to_idx = {g: i for i, g in enumerate(genome_ids)}
+        kmer_to_idx = {k: i for i, k in enumerate(kmer_sequences)}
+        
+        # Pre-allocate matrix
         feature_matrix = np.zeros((n_genomes, n_kmers), dtype=np.float32)
         
-        for i, genome in enumerate(genome_ids):
-            for j, kmer in enumerate(kmer_sequences):
-                feature_matrix[i, j] = kmer_dict[genome].get(kmer, 0.0)
+        # Vectorized approach: map genome_id and kmer_sequence to indices
+        logger.info("  Mapping genome IDs to row indices...")
+        row_indices = kmer_df['genome_id'].map(genome_to_idx).values
+        
+        logger.info("  Mapping k-mer sequences to column indices...")
+        col_indices = kmer_df['kmer_sequence'].map(kmer_to_idx).values
+        
+        logger.info("  Extracting probability values...")
+        values = kmer_df[value_col].values.astype(np.float32)
+        
+        # Fill matrix using advanced indexing (much faster than loops)
+        logger.info(f"  Filling {n_genomes:,} x {n_kmers:,} matrix with {len(values):,} values...")
+        feature_matrix[row_indices, col_indices] = values
+        
+        t_pivot_elapsed = time.time() - t_pivot
+        logger.info(f"  Pivot completed in {t_pivot_elapsed:.1f}s")
         
         # Store for later use
         self.genome_ids = genome_ids
         self.feature_names = kmer_sequences
         
-        logger.info(f"Built feature matrix: {feature_matrix.shape}")
+        t_total = time.time() - t_start
+        logger.info(f"Built feature matrix: {feature_matrix.shape} in {t_total:.1f}s")
         logger.info(f"Sparsity: {(feature_matrix == 0).sum() / feature_matrix.size * 100:.2f}%")
         
         return feature_matrix, genome_ids, kmer_sequences

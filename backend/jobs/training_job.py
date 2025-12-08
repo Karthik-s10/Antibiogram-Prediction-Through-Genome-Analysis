@@ -163,6 +163,7 @@ def train_xgboost_job(
             current_step="Starting XGBoost training pipeline..."
         )
         assembly_metadata = {}
+        genome_stats = {}
         
         # Step 1: Data preprocessing / alignment
         if use_rosetta_preprocessor and phenotype_path and kmer_path and rosetta_path:
@@ -184,7 +185,7 @@ def train_xgboost_job(
                 ),
             )
 
-            X_df, Y_df = preprocessor.preprocess_data(
+            X_df, Y_df, data_summary = preprocessor.preprocess_data(
                 phenotype_file=phenotype_path,
                 kmer_file=kmer_path,
                 use_cache=False,
@@ -199,6 +200,20 @@ def train_xgboost_job(
                     f"{X_df.shape[1]} features, {Y_df.shape[1]} antibiotics"
                 ),
             )
+
+            # Record detailed genome counts from preprocessing
+            try:
+                genome_stats = {
+                    'n_phenotype_records': int(data_summary.get('n_phenotype_records') or 0),
+                    'n_kmer_records': int(data_summary.get('n_kmer_records') or 0),
+                    'n_phenotype_genomes': int(data_summary.get('n_phenotype_genomes') or 0),
+                    'n_kmer_genomes': int(data_summary.get('n_kmer_genomes') or 0),
+                    'n_kmer_genomes_after_filter': int(data_summary.get('n_kmer_genomes_after_filter') or 0),
+                    'n_aligned_genomes': int(data_summary.get('n_aligned_genomes') or len(X_df)),
+                }
+            except Exception:
+                # Fail silently if anything goes wrong; training should still proceed
+                genome_stats = {}
 
             # Convert to numpy arrays for trainer
             aligned_genome_ids = list(X_df.index)
@@ -261,6 +276,23 @@ def train_xgboost_job(
             genome_id_to_idx = {gid: i for i, gid in enumerate(feature_genome_ids)}
             aligned_indices = [genome_id_to_idx[gid] for gid in aligned_genome_ids]
             X_aligned = X[aligned_indices]
+
+            # Detailed genome stats for in-memory path
+            try:
+                n_kmer_genomes = len(feature_genome_ids)
+                n_phenotype_genomes = int(phenotype_df['genome_id'].nunique())
+                n_aligned_genomes = len(aligned_genome_ids)
+                genome_stats = {
+                    'n_phenotype_records': int(len(phenotype_df)),
+                    'n_kmer_records': int(len(kmer_df)),
+                    'n_phenotype_genomes': int(n_phenotype_genomes),
+                    'n_kmer_genomes': int(n_kmer_genomes),
+                    # No early k-mer filtering step here, so this equals n_kmer_genomes
+                    'n_kmer_genomes_after_filter': int(n_kmer_genomes),
+                    'n_aligned_genomes': int(n_aligned_genomes),
+                }
+            except Exception:
+                genome_stats = genome_stats or {}
         
         logger.info(
             f"[{job_id}] Training data: {X_aligned.shape[0]} genomes, "
@@ -497,11 +529,35 @@ def train_xgboost_job(
         avg_f1 = sum(m['f1_macro'] for k, m in metrics.items() if 'error' not in m) / max(len(successful_models), 1)
         avg_jaccard = sum(m['jaccard_macro'] for k, m in metrics.items() if 'error' not in m) / max(len(successful_models), 1)
         
+        # Capture chunking details so the UI can show exactly how many genomes were used
+        # versus how many were available after alignment.
+        chunking_applied = bool(max_genomes and original_genome_count > max_genomes)
+
+        # High-level genome accounting so the UI can show where genomes are lost
+        n_phenotype_records = genome_stats.get('n_phenotype_records') if genome_stats else None
+        n_kmer_records = genome_stats.get('n_kmer_records') if genome_stats else None
+        n_phenotype_genomes = genome_stats.get('n_phenotype_genomes') if genome_stats else None
+        n_kmer_genomes = genome_stats.get('n_kmer_genomes') if genome_stats else None
+        n_kmer_genomes_after_filter = genome_stats.get('n_kmer_genomes_after_filter') if genome_stats else None
+        n_aligned_genomes = genome_stats.get('n_aligned_genomes') if genome_stats else None
+
         summary_metrics = {
             'model_type': 'xgboost',
             'model_name': model_name,
             'model_path': model_path,
+            # Genomes after alignment and after any chunking
             'n_genomes': X_aligned.shape[0],
+            'original_n_genomes': int(original_genome_count),
+            'chunking_applied': chunking_applied,
+            'max_genomes': max_genomes,
+            'cycle_index': cycle_index,
+            # Detailed genome flow diagnostics (may be None if not available)
+            'n_phenotype_records': n_phenotype_records,
+            'n_kmer_records': n_kmer_records,
+            'n_phenotype_genomes': n_phenotype_genomes,
+            'n_kmer_genomes': n_kmer_genomes,
+            'n_kmer_genomes_after_filter': n_kmer_genomes_after_filter,
+            'n_aligned_genomes': n_aligned_genomes,
             'n_features': X_aligned.shape[1],
             'n_antibiotics': len(antibiotic_names),
             'n_successful_models': len(successful_models),
@@ -571,6 +627,7 @@ def train_transformer_job(
             progress=0,
             current_step="Starting DNABERT Transformer training pipeline..."
         )
+        genome_stats = {}
         
         # Import DNABERT modules with error handling
         try:
@@ -643,6 +700,44 @@ def train_transformer_job(
             from preprocessing.phenotype_parser import PhenotypeParser
             phenotype_parser = PhenotypeParser()
             phenotype_df = phenotype_parser.parse_phenotype_file(phenotype_content)
+
+        # Optional early chunking: limit DNABERT preprocessing to a subset of aligned genomes
+        # so max_genomes/cycle_index also reduce the cost of gene dataset creation.
+        if max_genomes:
+            try:
+                kmer_genome_ids = sorted(genome_to_genes.keys())
+                pheno_genome_ids = set(phenotype_df['genome_id'].unique().tolist())
+                aligned_genome_ids = [g for g in kmer_genome_ids if g in pheno_genome_ids]
+                total_aligned = len(aligned_genome_ids)
+                if total_aligned == 0:
+                    logger.warning(
+                        f"[{job_id}] No overlapping genomes between k-mer and phenotype data for DNABERT preprocessing"
+                    )
+                elif total_aligned > max_genomes:
+                    start = cycle_index * max_genomes
+                    end = min(start + max_genomes, total_aligned)
+                    if start >= total_aligned:
+                        raise ValueError(
+                            f"cycle_index {cycle_index} is out of range for {total_aligned} aligned genomes "
+                            f"with max_genomes={max_genomes}"
+                        )
+                    selected_ids = set(aligned_genome_ids[start:end])
+                    genome_to_genes = {gid: genes for gid, genes in genome_to_genes.items() if gid in selected_ids}
+                    logger.info(
+                        f"[{job_id}] Limiting DNABERT preprocessing to genomes {start}-{end - 1} out of {total_aligned} "
+                        f"(chunk size {max_genomes}, cycle_index={cycle_index}); "
+                        f"{len(genome_to_genes)} genomes retained"
+                    )
+                    job_manager.update_job(
+                        job_id,
+                        progress=24,
+                        current_step=(
+                            f"Preparing DNABERT chunk: genomes {start}\u2013{end - 1} out of {total_aligned} "
+                            f"(chunk {cycle_index}, size {max_genomes})"
+                        ),
+                    )
+            except Exception as e:
+                logger.warning(f"[{job_id}] Failed to apply early max_genomes chunking for DNABERT: {e}")
         
         # Step 3: Create gene-level dataset
         logger.info(f"[{job_id}] Creating gene-level dataset...")
@@ -653,6 +748,27 @@ def train_transformer_job(
         )
         
         gene_df = processor.create_gene_dataset(genome_to_genes, phenotype_df)
+
+        # High-level genome accounting for Transformer pipeline
+        try:
+            n_phenotype_records = int(len(phenotype_df))
+            n_phenotype_genomes = int(phenotype_df['genome_id'].nunique())
+            n_kmer_genomes = int(len(genome_to_genes))
+            # For DNABERT, k-mer genomes and "after filter" are effectively the same
+            n_kmer_genomes_after_filter = n_kmer_genomes
+            # Aligned genomes before any chunking come from the gene_df
+            n_aligned_genomes = int(gene_df['genome_id'].nunique())
+
+            genome_stats = {
+                'n_phenotype_records': n_phenotype_records,
+                'n_kmer_records': None,
+                'n_phenotype_genomes': n_phenotype_genomes,
+                'n_kmer_genomes': n_kmer_genomes,
+                'n_kmer_genomes_after_filter': n_kmer_genomes_after_filter,
+                'n_aligned_genomes': n_aligned_genomes,
+            }
+        except Exception:
+            genome_stats = genome_stats or {}
         
         if len(gene_df) < 100:
             raise ValueError(f"Insufficient gene data: {len(gene_df)} genes. Need at least 100.")
@@ -873,13 +989,37 @@ def train_transformer_job(
         avg_accuracy = sum(m['accuracy'] for k, m in metrics.items() if 'error' not in m) / max(len(successful_models), 1)
         avg_f1 = sum(m['f1_macro'] for k, m in metrics.items() if 'error' not in m) / max(len(successful_models), 1)
         avg_jaccard = sum(m['jaccard_macro'] for k, m in metrics.items() if 'error' not in m) / max(len(successful_models), 1)
-        
+
+        # Chunking details for Transformer too
+        transformer_original_genomes = int(original_genome_count)
+        transformer_chunking_applied = bool(max_genomes and transformer_original_genomes > max_genomes)
+        used_genomes = int(gene_df['genome_id'].nunique())
+
+        # Reuse genome_stats for UI diagnostics
+        n_phenotype_records = genome_stats.get('n_phenotype_records') if genome_stats else None
+        n_kmer_records = genome_stats.get('n_kmer_records') if genome_stats else None
+        n_phenotype_genomes = genome_stats.get('n_phenotype_genomes') if genome_stats else None
+        n_kmer_genomes = genome_stats.get('n_kmer_genomes') if genome_stats else None
+        n_kmer_genomes_after_filter = genome_stats.get('n_kmer_genomes_after_filter') if genome_stats else None
+        n_aligned_genomes = genome_stats.get('n_aligned_genomes') if genome_stats else None
+
         summary_metrics = {
             'model_type': 'transformer_dnabert',
             'model_name': model_name,
             'model_path': model_path,
             'n_genes': len(gene_df),
-            'n_genomes': gene_df['genome_id'].nunique(),
+            'n_genomes': used_genomes,
+            'original_n_genomes': transformer_original_genomes,
+            'chunking_applied': transformer_chunking_applied,
+            'max_genomes': max_genomes,
+            'cycle_index': cycle_index,
+            # Detailed genome flow diagnostics (may be None if not available)
+            'n_phenotype_records': n_phenotype_records,
+            'n_kmer_records': n_kmer_records,
+            'n_phenotype_genomes': n_phenotype_genomes,
+            'n_kmer_genomes': n_kmer_genomes,
+            'n_kmer_genomes_after_filter': n_kmer_genomes_after_filter,
+            'n_aligned_genomes': n_aligned_genomes,
             'n_antibiotics': len(trainer.antibiotic_names),
             'n_successful_models': len(successful_models),
             'antibiotics': trainer.antibiotic_names,
