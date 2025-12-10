@@ -10,9 +10,9 @@ from sklearn.metrics import f1_score, accuracy_score, jaccard_score, classificat
 import pickle
 import json
 import os
+import re
 import logging
 import time
-import re
 
 # Import torch with error handling for DLL loading issues
 try:
@@ -193,6 +193,8 @@ class DNABERTTrainer:
         self.tokenizer = None
         self.models: Dict[str, any] = {}
         self.antibiotic_names: List[str] = []
+        self.antibiotic_model_paths: Dict[str, str] = {}
+        self.model_base_dir: Optional[str] = None
         
         # Detect device - prioritize GPU
         self.device = self._detect_gpu_device()
@@ -673,8 +675,8 @@ class DNABERTTrainer:
 
         # Tokenize all gene sequences once and reuse across antibiotics
         encodings = self._tokenize_sequences(gene_sequences)
-        input_ids = encodings['input_ids'].to(self.device)
-        attention_mask = encodings['attention_mask'].to(self.device)
+        input_ids_cpu = encodings['input_ids']
+        attention_mask_cpu = encodings['attention_mask']
 
         genome_predictions: Dict[str, int] = {}
         predictions_proba: Dict[str, np.ndarray] = {}
@@ -687,143 +689,210 @@ class DNABERTTrainer:
         # derive per-gene impact scores downstream.
         self.gene_level_probabilities: Dict[str, np.ndarray] = {}
 
-        for antibiotic, model in self.models.items():
-            # Predict for each gene for this antibiotic model
-            model.eval()
+        # Decide whether to use lazy loading (per-antibiotic directories) or
+        # in-memory models (legacy/just-trained models).
+        use_lazy = bool(self.antibiotic_model_paths) and not bool(self.models)
+
+        # Legacy / in-memory path: all models are already loaded
+        if not use_lazy and self.models:
+            input_ids = input_ids_cpu.to(self.device)
+            attention_mask = attention_mask_cpu.to(self.device)
+
+            for antibiotic, model in self.models.items():
+                # Predict for each gene for this antibiotic model
+                model.eval()
+                with torch.no_grad():
+                    outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+                    logits = outputs.logits
+                    probs = F.softmax(logits, dim=-1)
+
+                    # Gene-level predictions
+                    gene_predictions = torch.argmax(logits, dim=1).cpu().numpy()
+
+                # Persist raw gene-level predictions (0=S,1=I,2=R) for explainability
+                try:
+                    self.gene_level_predictions[antibiotic] = [int(v) for v in gene_predictions.tolist()]
+                except Exception:
+                    # Best-effort only; do not break predictions if conversion fails
+                    pass
+
+                # Persist per-gene probabilities for each antibiotic
+                try:
+                    self.gene_level_probabilities[antibiotic] = probs.cpu().numpy()
+                except Exception:
+                    # Best-effort only
+                    pass
+
+                # Aggregate: if any gene is resistant (2), genome is resistant
+                # Otherwise, if any gene is intermediate (1), genome is intermediate
+                # Otherwise, genome is susceptible (0)
+                if np.any(gene_predictions == 2):
+                    genome_pred = 2  # Resistant
+                elif np.any(gene_predictions == 1):
+                    genome_pred = 1  # Intermediate
+                else:
+                    genome_pred = 0  # Susceptible
+
+                genome_predictions[antibiotic] = int(genome_pred)
+
+                # Per-class probabilities (S/I/R) averaged across genes
+                avg_probs = probs.mean(dim=0).cpu().numpy()
+                predictions_proba[antibiotic] = avg_probs
+
+            return genome_predictions, predictions_proba
+
+        # Lazy path: load one model at a time from disk to keep GPU memory low
+        base_dir = self.model_base_dir
+        if not base_dir:
+            raise ValueError("DNABERTTrainer.model_base_dir not set for lazy loading.")
+
+        run_device = self.device
+
+        # Use a stable order of antibiotics
+        antibiotics = self.antibiotic_names or list(self.antibiotic_model_paths.keys())
+
+        for antibiotic in antibiotics:
+            rel_path = self.antibiotic_model_paths.get(antibiotic)
+            if not rel_path:
+                continue
+
+            ab_dir = os.path.join(base_dir, rel_path)
+
+            try:
+                model = AutoModelForSequenceClassification.from_pretrained(ab_dir)
+                model.to(run_device)
+                model.eval()
+            except Exception as e:
+                logger.error(f"Failed to load DNABERT model for {antibiotic} from {ab_dir}: {e}")
+                continue
+
+            # Move inputs to device for this antibiotic
+            input_ids = input_ids_cpu.to(run_device)
+            attention_mask = attention_mask_cpu.to(run_device)
+
             with torch.no_grad():
                 outputs = model(input_ids=input_ids, attention_mask=attention_mask)
                 logits = outputs.logits
                 probs = F.softmax(logits, dim=-1)
 
-                # Gene-level predictions
                 gene_predictions = torch.argmax(logits, dim=1).cpu().numpy()
 
-            # Persist raw gene-level predictions (0=S,1=I,2=R) for explainability
             try:
                 self.gene_level_predictions[antibiotic] = [int(v) for v in gene_predictions.tolist()]
             except Exception:
-                # Best-effort only; do not break predictions if conversion fails
                 pass
 
-            # Persist per-gene probabilities for each antibiotic
             try:
                 self.gene_level_probabilities[antibiotic] = probs.cpu().numpy()
             except Exception:
-                # Best-effort only
                 pass
 
-            # Aggregate: if any gene is resistant (2), genome is resistant
-            # Otherwise, if any gene is intermediate (1), genome is intermediate
-            # Otherwise, genome is susceptible (0)
             if np.any(gene_predictions == 2):
-                genome_pred = 2  # Resistant
+                genome_pred = 2
             elif np.any(gene_predictions == 1):
-                genome_pred = 1  # Intermediate
+                genome_pred = 1
             else:
-                genome_pred = 0  # Susceptible
+                genome_pred = 0
 
             genome_predictions[antibiotic] = int(genome_pred)
 
-            # Per-class probabilities (S/I/R) averaged across genes
             avg_probs = probs.mean(dim=0).cpu().numpy()
             predictions_proba[antibiotic] = avg_probs
+
+            # Free this model before moving to the next antibiotic
+            del model
+            if run_device.type == "cuda":
+                try:
+                    torch.cuda.empty_cache()
+                except Exception:
+                    pass
 
         return genome_predictions, predictions_proba
     
     def save_models(self, model_dir: str, model_name: str) -> str:
-        """Save trained models and tokenizer.
-
-        New layout (v1):
-        - All artifacts are stored under `<model_dir>/<model_name>/`.
-        - Tokenizer: `tokenizer/` (Hugging Face format).
-        - Per-antibiotic models: `antibiotics/<idx>_<slug>/` (HF format).
-        - Small index pickle: `model.pkl` describing the layout.
-        - Metadata JSON: `metadata.json` with high-level info for UI and
-          StorageService.list_models().
-
-        This avoids pickling all DNABERT models into one huge binary while
-        remaining backward-compatible via load_models.
-        """
+        """Save trained models and tokenizer."""
         os.makedirs(model_dir, exist_ok=True)
 
-        # Root directory for this trained Transformer model
-        root_dir = os.path.join(model_dir, model_name)
-        os.makedirs(root_dir, exist_ok=True)
+        # Always use a dedicated subdirectory for this model to store a
+        # lightweight index pickle plus per-antibiotic Hugging Face
+        # directories. This avoids a single giant pickle containing all
+        # DNABERT models.
+        base_dir = os.path.join(model_dir, model_name)
+        os.makedirs(base_dir, exist_ok=True)
 
-        antibiotics_root = os.path.join(root_dir, "antibiotics")
+        # Save tokenizer once for all antibiotics
+        tokenizer_dir_name = "tokenizer"
+        tokenizer_dir = os.path.join(base_dir, tokenizer_dir_name)
+        os.makedirs(tokenizer_dir, exist_ok=True)
+
+        if self.tokenizer is not None:
+            try:
+                self.tokenizer.save_pretrained(tokenizer_dir)
+            except Exception as e:
+                logger.warning(f"Failed to save DNABERT tokenizer to {tokenizer_dir}: {e}")
+
+        antibiotics_root = os.path.join(base_dir, "antibiotics")
         os.makedirs(antibiotics_root, exist_ok=True)
 
-        # Ensure tokenizer is available and save it in HF format
-        tokenizer_dir = os.path.join(root_dir, "tokenizer")
-        if self.tokenizer is None:
-            logger.info("Tokenizer not set on trainer; loading from base model before save")
-            self.tokenizer = AutoTokenizer.from_pretrained(self.model_name, do_lower_case=False)
-        try:
-            self.tokenizer.save_pretrained(tokenizer_dir)
-        except Exception as e:
-            logger.warning(f"Failed to save DNABERT tokenizer to {tokenizer_dir}: {e}")
+        antibiotic_models_index: Dict[str, str] = {}
 
-        # Save each antibiotic model into its own subdirectory
-        antibiotic_dirs: Dict[str, str] = {}
         for idx, antibiotic in enumerate(self.antibiotic_names):
             model = self.models.get(antibiotic)
             if model is None:
                 continue
 
-            # Safe directory name: index + slugified antibiotic label
-            slug = re.sub(r"[^a-zA-Z0-9_.-]+", "_", antibiotic)
-            subdir_rel = os.path.join("antibiotics", f"{idx:03d}_{slug}")
-            subdir_abs = os.path.join(root_dir, subdir_rel)
-            os.makedirs(subdir_abs, exist_ok=True)
+            safe_name = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(antibiotic).strip().lower())
+            if not safe_name:
+                safe_name = f"antibiotic_{idx}"
+
+            subdir_name = f"{idx:03d}_{safe_name}"
+            rel_path = os.path.join("antibiotics", subdir_name)
+            ab_dir = os.path.join(base_dir, rel_path)
+            os.makedirs(ab_dir, exist_ok=True)
 
             try:
-                # Move to CPU before saving to avoid device-specific issues
-                try:
-                    model_cpu = model.to("cpu")
-                except Exception:
-                    model_cpu = model
-                model_cpu.save_pretrained(subdir_abs)
-                antibiotic_dirs[antibiotic] = subdir_rel
-                logger.info(f"Saved DNABERT model for {antibiotic} to {subdir_abs}")
+                model.save_pretrained(ab_dir)
+                antibiotic_models_index[antibiotic] = rel_path
             except Exception as e:
-                logger.error(f"Failed to save DNABERT model for {antibiotic} at {subdir_abs}: {e}")
+                logger.error(f"Failed to save DNABERT model for {antibiotic} to {ab_dir}: {e}")
 
-        # Small index pickle that describes where things are stored on disk.
-        # This is the path returned to callers and used by DNABERTTrainer.load_models.
-        model_path = os.path.join(root_dir, "model.pkl")
-        index_dict = {
-            "storage_format": "per_antibiotic_dir_v1",
-            "model_name": model_name,
-            "base_model": self.model_name,
-            "antibiotic_names": self.antibiotic_names,
-            "antibiotic_dirs": antibiotic_dirs,
-            "tokenizer_dir": "tokenizer",
-            "hyperparameters": {
-                "model_name": self.model_name,
-                "max_length": self.max_length,
-                "batch_size": self.batch_size,
-                "epochs": self.epochs,
-                "learning_rate": self.learning_rate,
-                "kmer_size": self.kmer_size,
-            },
+        hyperparameters = {
+            'model_name': self.model_name,
+            'max_length': self.max_length,
+            'batch_size': self.batch_size,
+            'epochs': self.epochs,
+            'learning_rate': self.learning_rate,
+            'kmer_size': self.kmer_size,
         }
 
-        with open(model_path, "wb") as f:
+        # Lightweight index describing where per-antibiotic models and
+        # tokenizer are stored.
+        index_dict = {
+            'storage_format': 'per_antibiotic_dir_v1',
+            'antibiotic_models': antibiotic_models_index,
+            'antibiotic_names': self.antibiotic_names,
+            'tokenizer_dir': tokenizer_dir_name,
+            'hyperparameters': hyperparameters,
+        }
+
+        model_path = os.path.join(base_dir, "model.pkl")
+        with open(model_path, 'wb') as f:
             pickle.dump(index_dict, f)
 
-        # Build/merge metadata.json alongside the index
-        metadata_path = os.path.join(root_dir, "metadata.json")
+        metadata_path = os.path.join(base_dir, "metadata.json")
         metadata = {
-            "model_name": model_name,
-            "model_type": "transformer_dnabert",
-            "base_model": self.model_name,
-            "n_antibiotics": len(self.antibiotic_names),
-            "antibiotic_names": self.antibiotic_names,
+            'model_name': model_name,
+            'model_type': 'transformer_dnabert',
+            'storage_format': 'per_antibiotic_dir_v1',
+            'base_model': self.model_name,
+            'n_antibiotics': len(self.antibiotic_names),
+            'antibiotic_names': self.antibiotic_names,
+            'hyperparameters': hyperparameters,
         }
 
         if os.path.exists(metadata_path):
             try:
-                with open(metadata_path, "r") as f:
+                with open(metadata_path, 'r') as f:
                     existing = json.load(f)
                 if isinstance(existing, dict):
                     merged = existing.copy()
@@ -832,109 +901,99 @@ class DNABERTTrainer:
             except Exception as e:
                 logger.warning(f"Failed to merge existing Transformer metadata at {metadata_path}: {e}")
 
-        with open(metadata_path, "w") as f:
+        with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
 
         logger.info(
-            f"Saved DNABERT models for {len(antibiotic_dirs)} antibiotics to directory {root_dir} "
-            f"(index file: {model_path})"
+            f"Saved DNABERT models (per-antibiotic layout) to {model_path} "
+            f"for {len(self.antibiotic_names)} antibiotics"
         )
 
         return model_path
     
     @classmethod
     def load_models(cls, model_path: str) -> 'DNABERTTrainer':
-        """Load trained models from disk.
-
-        Supports two layouts:
-
-        1) New "per_antibiotic_dir_v1" layout, where model_path points to a
-           small index pickle inside `<model_dir>/<model_name>/model.pkl` and
-           each antibiotic lives in its own Hugging Face directory.
-
-        2) Legacy layout, where model_path is a large pickle containing
-           in-memory `models`, `tokenizer`, and hyperparameters.
-        """
+        """Load trained models from file."""
         with open(model_path, 'rb') as f:
             save_dict = pickle.load(f)
 
-        storage_format = getattr(save_dict, "get", lambda *_: None)("storage_format")
+        storage_format = save_dict.get('storage_format')
 
-        # New layout: load tokenizer and per-antibiotic models from subdirs
-        if storage_format == "per_antibiotic_dir_v1":
-            base_model = save_dict.get("base_model", "zhihan1996/DNA_bert_6")
-            hyper = save_dict.get("hyperparameters", {}) or {}
+        # New per-antibiotic directory layout
+        if storage_format == 'per_antibiotic_dir_v1':
+            base_dir = os.path.dirname(model_path)
+            hyper = save_dict.get('hyperparameters', {})
+
+            model_name = hyper.get('model_name', settings.transformer_model_name)
+            max_length = hyper.get('max_length', settings.transformer_max_length)
+            batch_size = hyper.get('batch_size', settings.transformer_batch_size)
+            epochs = hyper.get('epochs', settings.transformer_epochs)
+            learning_rate = hyper.get('learning_rate', settings.transformer_learning_rate)
+            kmer_size = hyper.get('kmer_size', settings.kmer_size_dnabert)
 
             trainer = cls(
-                model_name=base_model,
-                max_length=hyper.get("max_length", 512),
-                batch_size=hyper.get("batch_size", 16),
-                epochs=hyper.get("epochs", 3),
-                learning_rate=hyper.get("learning_rate", 2e-5),
-                kmer_size=hyper.get("kmer_size", 6),
+                model_name=model_name,
+                max_length=max_length,
+                batch_size=batch_size,
+                epochs=epochs,
+                learning_rate=learning_rate,
+                kmer_size=kmer_size,
             )
+            trainer.model_base_dir = base_dir
 
-            trainer.antibiotic_names = save_dict.get("antibiotic_names", []) or []
-            trainer.model_name = base_model
+            tokenizer_dir_name = save_dict.get('tokenizer_dir', 'tokenizer')
+            tokenizer_dir = os.path.join(base_dir, tokenizer_dir_name)
 
-            root_dir = os.path.dirname(model_path)
-
-            # Load tokenizer from its saved directory, falling back to base model if needed
-            tokenizer_rel = save_dict.get("tokenizer_dir", "tokenizer")
-            tokenizer_dir = os.path.join(root_dir, tokenizer_rel)
             try:
-                trainer.tokenizer = AutoTokenizer.from_pretrained(tokenizer_dir)
+                if os.path.isdir(tokenizer_dir):
+                    trainer.tokenizer = AutoTokenizer.from_pretrained(tokenizer_dir, do_lower_case=False)
+                else:
+                    trainer.tokenizer = AutoTokenizer.from_pretrained(trainer.model_name, do_lower_case=False)
             except Exception as e:
-                logger.warning(
-                    f"Failed to load saved DNABERT tokenizer from {tokenizer_dir}: {e}; "
-                    f"falling back to base model tokenizer {base_model}"
-                )
-                trainer.tokenizer = AutoTokenizer.from_pretrained(base_model, do_lower_case=False)
+                logger.error(f"Failed to load DNABERT tokenizer from {tokenizer_dir}: {e}")
+                raise
 
-            antibiotic_dirs = save_dict.get("antibiotic_dirs", {}) or {}
-            models: Dict[str, any] = {}
+            antibiotic_models_index = save_dict.get('antibiotic_models', {})
+            trainer.antibiotic_model_paths = {
+                antibiotic: rel_path for antibiotic, rel_path in antibiotic_models_index.items()
+            }
 
-            for antibiotic in trainer.antibiotic_names:
-                subdir_rel = antibiotic_dirs.get(antibiotic)
-                if not subdir_rel:
-                    logger.warning(
-                        f"No directory mapping found for antibiotic {antibiotic} in index {model_path}; skipping."
-                    )
-                    continue
-
-                ab_dir = os.path.join(root_dir, subdir_rel)
-                if not os.path.isdir(ab_dir):
-                    logger.warning(
-                        f"Expected DNABERT directory for antibiotic {antibiotic} not found at {ab_dir}; skipping."
-                    )
-                    continue
-
-                try:
-                    model = AutoModelForSequenceClassification.from_pretrained(ab_dir)
-                    model.to(trainer.device)
-                    models[antibiotic] = model
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to load DNABERT model for antibiotic {antibiotic} from {ab_dir}: {e}"
-                    )
-
-            trainer.models = models
+            saved_names = save_dict.get('antibiotic_names', [])
+            if saved_names:
+                trainer.antibiotic_names = saved_names
+            else:
+                trainer.antibiotic_names = sorted(trainer.antibiotic_model_paths.keys())
 
             logger.info(
-                f"Loaded DNABERT models for {len(models)} antibiotics from directory layout at {root_dir}"
+                f"Initialized DNABERT per-antibiotic layout at {base_dir} "
+                f"({len(trainer.antibiotic_names)} antibiotics; lazy loading enabled)"
             )
             return trainer
 
-        # Legacy fallback: large pickle containing all models and tokenizer
-        trainer = cls()
+        # Legacy monolithic pickle layout for backward compatibility
+        hyper = save_dict.get('hyperparameters', {})
+
+        model_name = hyper.get('model_name', settings.transformer_model_name)
+        max_length = hyper.get('max_length', settings.transformer_max_length)
+        batch_size = hyper.get('batch_size', settings.transformer_batch_size)
+        epochs = hyper.get('epochs', settings.transformer_epochs)
+        learning_rate = hyper.get('learning_rate', settings.transformer_learning_rate)
+        kmer_size = hyper.get('kmer_size', settings.kmer_size_dnabert)
+
+        trainer = cls(
+            model_name=model_name,
+            max_length=max_length,
+            batch_size=batch_size,
+            epochs=epochs,
+            learning_rate=learning_rate,
+            kmer_size=kmer_size,
+        )
+
         trainer.models = save_dict['models']
         trainer.tokenizer = save_dict['tokenizer']
-        trainer.antibiotic_names = save_dict['antibiotic_names']
-        trainer.model_name = save_dict['hyperparameters']['model_name']
-        trainer.max_length = save_dict['hyperparameters']['max_length']
-        trainer.kmer_size = save_dict['hyperparameters'].get('kmer_size', trainer.kmer_size)
+        trainer.antibiotic_names = save_dict.get('antibiotic_names', [])
 
-        logger.info(f"Loaded legacy DNABERT models from {model_path}")
+        logger.info(f"Loaded DNABERT models from legacy pickle at {model_path}")
 
         return trainer
 

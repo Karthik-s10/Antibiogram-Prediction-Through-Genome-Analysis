@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 
 // NCBI API Key - Using the official NCBI Datasets API
-const NCBI_API_KEY = "feec4ac9f28178c8b078da5292d7caa86408";
+const NCBI_API_KEY = import.meta.env.VITE_NCBI_API_KEY || "";
 
 // NCBI Datasets API base URL - Official v2alpha endpoint
 const NCBI_DATASETS_BASE_URL = "https://api.ncbi.nlm.nih.gov/datasets/v2alpha";

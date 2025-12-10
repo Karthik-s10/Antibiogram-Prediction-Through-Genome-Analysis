@@ -5,6 +5,9 @@
 
 $PORT = 8000
 $ServerHost = "localhost"
+$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$backendDir = Join-Path $scriptDir "backend"
+$venvPython = Join-Path $backendDir "venv\Scripts\python.exe"
 
 Write-Host "============================================" -ForegroundColor Cyan
 Write-Host "  BACKEND SERVER STARTUP" -ForegroundColor Cyan
@@ -27,24 +30,16 @@ if ($existingProcess) {
 
 # Check/create virtual environment
 Write-Host "[2/4] Checking virtual environment..." -ForegroundColor Yellow
-if (-not (Test-Path "backend\venv\Scripts\python.exe")) {
+if (-not (Test-Path $venvPython)) {
     Write-Host "      Creating virtual environment..." -ForegroundColor Yellow
-    python -m venv backend\venv
+    python -m venv (Join-Path $backendDir "venv")
     Write-Host "      Virtual environment created." -ForegroundColor Green
 } else {
     Write-Host "      Virtual environment exists." -ForegroundColor Green
 }
 
 # Install/update dependencies
-Write-Host "[3/4] Checking dependencies..." -ForegroundColor Yellow
-$pipCheck = & backend\venv\Scripts\pip.exe show fastapi 2>$null
-if (-not $pipCheck) {
-    Write-Host "      Installing dependencies (this may take a few minutes)..." -ForegroundColor Yellow
-    & backend\venv\Scripts\pip.exe install -r backend\requirements.txt --quiet
-    Write-Host "      Dependencies installed." -ForegroundColor Green
-} else {
-    Write-Host "      Dependencies already installed." -ForegroundColor Green
-}
+Write-Host "[3/4] Skipping automatic dependency installation (use pip manually if needed)..." -ForegroundColor Yellow
 
 # Start the server
 Write-Host "[4/4] Starting FastAPI server..." -ForegroundColor Yellow
@@ -56,5 +51,5 @@ Write-Host "  Press Ctrl+C to stop" -ForegroundColor Yellow
 Write-Host "============================================" -ForegroundColor Green
 Write-Host ""
 
-Set-Location backend
-& .\venv\Scripts\python.exe -m uvicorn main:app --reload --host $ServerHost --port $PORT
+Set-Location $backendDir
+& $venvPython -m uvicorn main:app --reload --host $ServerHost --port $PORT

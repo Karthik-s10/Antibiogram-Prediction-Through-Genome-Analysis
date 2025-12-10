@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     # Pydantic v2 configuration
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(BASE_DIR / ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",  # Ignore unknown env vars like vite_api_url
