@@ -18,6 +18,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import ExplainabilityView from "./ExplainabilityView";
+import { ModelExplanation } from "./explanation/ModelExplanation";
 import { PredictionResult } from "@/lib/resistancePredictor";
 
 interface ResultsDashboardProps {
@@ -27,6 +28,10 @@ interface ResultsDashboardProps {
   analysisSummary?: any;
   timestamp?: string;
   onNewUpload?: () => void;
+  sampleData?: Record<string, any>;
+  sequence?: string;
+  modelType?: 'xgboost' | 'dnabert';
+  featureNames?: string[];
 }
 
 const ResultsDashboard = ({
@@ -36,6 +41,10 @@ const ResultsDashboard = ({
   analysisSummary,
   timestamp = new Date().toLocaleString(),
   onNewUpload = () => {},
+  sampleData,
+  sequence,
+  modelType,
+  featureNames,
 }: ResultsDashboardProps) => {
   const [activeTab, setActiveTab] = useState("profile");
 
@@ -196,9 +205,10 @@ const ResultsDashboard = ({
             onValueChange={setActiveTab}
             className="w-full"
           >
-            <TabsList className="grid w-full grid-cols-2 mb-8">
+            <TabsList className="grid w-full grid-cols-3 mb-8">
               <TabsTrigger value="profile">Resistance Profile</TabsTrigger>
               <TabsTrigger value="explainability">Genetic Markers</TabsTrigger>
+              <TabsTrigger value="model-explanation">Model Explanation</TabsTrigger>
             </TabsList>
 
             <TabsContent value="profile" className="space-y-4">
@@ -509,6 +519,28 @@ const ResultsDashboard = ({
                   genomeId={sampleName}
                   analysisSummary={analysisSummary}
                 />
+              </div>
+            </TabsContent>
+            
+            <TabsContent value="model-explanation">
+              <div className="space-y-6">
+                {sampleData && (
+                  <ModelExplanation
+                    sampleData={sampleData}
+                    sequence={sequence}
+                    modelType={modelType || 'xgboost'}
+                    featureNames={featureNames}
+                  />
+                )}
+                {!sampleData && (
+                  <Card>
+                    <CardContent className="text-center py-8">
+                      <p className="text-muted-foreground">
+                        No sample data available for model explanation.
+                      </p>
+                    </CardContent>
+                  </Card>
+                )}
               </div>
             </TabsContent>
           </Tabs>

@@ -1,13 +1,20 @@
 "use client";
 import React, { useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import GenomeUploader from "./GenomeUploader";
 import ResultsDashboard from "./ResultsDashboard";
 import TrainingPipeline from "./TrainingPipeline";
 import TrainingStatus from "./TrainingStatus";
 import TrainingHistory from "./TrainingHistory";
 import NCBIGenomeSearch from "./NCBIGenomeSearch";
-import Sidebar from "./layout/Sidebar";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   ResistancePredictor,
   PredictionResult,
@@ -15,17 +22,6 @@ import {
 } from "@/lib/resistancePredictor";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Label } from "@/components/ui/label";
-import {
-  Upload,
-  Database,
-  BarChart3,
-  Cpu,
-  Activity,
-  ChevronRight,
-  Sparkles,
-  Zap,
-  Shield,
-} from "lucide-react";
 
 interface GenomeData {
   id: string;
@@ -209,229 +205,201 @@ const HomePage = () => {
     setActiveTab("training");
   };
 
-  // Page title based on active tab
-  const getPageTitle = () => {
-    switch (activeTab) {
-      case "upload": return "Genome Upload";
-      case "database": return "Genome Database";
-      case "results": return "Results Dashboard";
-      case "training": return "Model Training";
-      case "training-status": return "Training Status";
-      default: return "Dashboard";
-    }
-  };
-
-  const getPageDescription = () => {
-    switch (activeTab) {
-      case "upload": return "Upload bacterial genome sequences for resistance prediction";
-      case "database": return "Search and download genomes from NCBI database";
-      case "results": return "View antibiotic resistance predictions and analysis";
-      case "training": return "Train machine learning models on genomic data";
-      case "training-status": return "Monitor training progress and view history";
-      default: return "";
-    }
-  };
-
   return (
-    <div className="min-h-screen flex">
-      {/* Sidebar */}
-      <Sidebar activeTab={activeTab} onTabChange={setActiveTab} />
-
-      {/* Main Content */}
-      <main className="flex-1 ml-64">
-        {/* Top Header Bar */}
-        <header className="sticky top-0 z-40 bg-background/80 backdrop-blur-xl border-b border-border">
-          <div className="flex items-center justify-between px-8 py-4">
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">{getPageTitle()}</h1>
-              <p className="text-sm text-muted-foreground">{getPageDescription()}</p>
-            </div>
-
-            {/* Model Mode Selector - Only show on upload tab */}
-            {activeTab === "upload" && (
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2 bg-secondary rounded-xl p-1">
-                  {[
-                    { value: "xgboost", label: "XGBoost", icon: <Zap className="w-4 h-4" /> },
-                    { value: "transformer", label: "Transformer", icon: <Sparkles className="w-4 h-4" /> },
-                    { value: "both", label: "Ensemble", icon: <Shield className="w-4 h-4" /> },
-                  ].map((mode) => (
-                    <button
-                      key={mode.value}
-                      onClick={() => setModelMode(mode.value as any)}
-                      className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                        modelMode === mode.value
-                          ? "bg-primary text-primary-foreground"
-                          : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {mode.icon}
-                      {mode.label}
-                    </button>
-                  ))}
-                </div>
-                <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={useBlast}
-                    onChange={(e) => setUseBlast(e.target.checked)}
-                    className="w-4 h-4 rounded border-border bg-secondary"
-                  />
-                  BLAST naming
-                </label>
-              </div>
-            )}
-          </div>
+    <div className="min-h-screen p-6 md:p-10">
+      <motion.div
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="max-w-7xl mx-auto"
+      >
+        <header className="mb-8 text-center">
+          <h1 className="text-3xl md:text-4xl lg:text-6xl font-bold text-slate-800 mb-4 drop-shadow-lg">
+            Bacterial Antibiogram Predictor
+          </h1>
+          <p className="text-base md:text-lg lg:text-xl text-slate-700 font-normal max-w-2xl mx-auto drop-shadow-md">
+            Predict antibiotic resistance profiles from whole-genome sequences using AI-powered machine learning
+          </p>
         </header>
 
-        {/* Page Content */}
-        <div className="p-8">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              transition={{ duration: 0.2 }}
+        <Card className="bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 border border-blue-100 shadow-lg">
+          <CardHeader>
+            <CardTitle>Antibiogram Analysis</CardTitle>
+            <CardDescription>
+              Upload a bacterial genome sequence (FASTA format) to predict its
+              antibiotic resistance profile.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Tabs
+              value={activeTab}
+              onValueChange={setActiveTab}
+              className="w-full"
             >
-              {activeTab === "upload" && (
-                <div className="space-y-6">
-                  {/* Quick Stats Cards */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="revolut-card p-6 revolut-glow-blue">
-                      <div className="flex items-center gap-4">
-                        <div className="feature-icon revolut-gradient-blue">
-                          <Upload className="w-6 h-6 text-white" />
-                        </div>
-                        <div>
-                          <p className="text-sm text-muted-foreground">Ready to Analyze</p>
-                          <p className="text-2xl font-bold text-foreground">FASTA Files</p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="revolut-card p-6">
-                      <div className="flex items-center gap-4">
-                        <div className="feature-icon revolut-gradient-green">
-                          <Sparkles className="w-6 h-6 text-white" />
-                        </div>
-                        <div>
-                          <p className="text-sm text-muted-foreground">Model</p>
-                          <p className="text-2xl font-bold text-foreground capitalize">{modelMode}</p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="revolut-card p-6">
-                      <div className="flex items-center gap-4">
-                        <div className="feature-icon revolut-gradient-purple">
-                          <Shield className="w-6 h-6 text-white" />
-                        </div>
-                        <div>
-                          <p className="text-sm text-muted-foreground">Analysis</p>
-                          <p className="text-2xl font-bold text-foreground">AI-Powered</p>
-                        </div>
-                      </div>
-                    </div>
+              <div className="mb-6 flex flex-col gap-2">
+                <span className="text-sm font-medium text-slate-700">
+                  Prediction model mode
+                </span>
+                <RadioGroup
+                  className="grid gap-3 md:grid-cols-3"
+                  value={modelMode}
+                  onValueChange={(value: string) =>
+                    setModelMode(
+                      value as "auto" | "xgboost" | "transformer" | "both",
+                    )
+                  }
+                >
+                  <div className="flex items-start space-x-2 rounded-md border p-3">
+                    <RadioGroupItem value="xgboost" id="mode-xgboost" />
+                    <Label
+                      htmlFor="mode-xgboost"
+                      className="space-y-1 leading-tight"
+                    >
+                      <span className="block text-sm font-semibold">
+                        XGBoost only
+                      </span>
+                      <span className="block text-xs text-slate-600">
+                        Fast baseline classifier using k-mer features.
+                      </span>
+                    </Label>
                   </div>
-
-                  {/* Upload Component */}
-                  <div className="revolut-card p-6">
-                    <GenomeUploader
-                      onFileUpload={handleFileUpload}
-                      isProcessing={isProcessing}
+                  <div className="flex items-start space-x-2 rounded-md border p-3">
+                    <RadioGroupItem
+                      value="transformer"
+                      id="mode-transformer"
                     />
+                    <Label
+                      htmlFor="mode-transformer"
+                      className="space-y-1 leading-tight"
+                    >
+                      <span className="block text-sm font-semibold">
+                        Transformer only
+                      </span>
+                      <span className="block text-xs text-slate-600">
+                        DNABERT genome embeddings with similarity search.
+                      </span>
+                    </Label>
                   </div>
-                </div>
-              )}
-
-              {activeTab === "database" && (
-                <div className="revolut-card p-6">
-                  <NCBIGenomeSearch
-                    onGenomeSelect={(genome) => {
-                      console.log('Selected genome:', genome);
-                    }}
-                    onSequenceDownload={(genome) => {
-                      console.log('Downloaded sequence for:', genome.organism);
-                    }}
-                    onBatchProcess={async (genomes) => {
-                      console.log(`Processing ${genomes.length} genomes`);
-                      for (const genome of genomes) {
-                        if (genome.fastaContent) {
-                          const blob = new Blob([genome.fastaContent], { type: 'text/plain' });
-                          const file = new File([blob], `${genome.organism}.fasta`, { type: 'text/plain' });
-                          await handleFileUpload(file);
-                        }
-                      }
-                    }}
+                  <div className="flex items-start space-x-2 rounded-md border p-3 bg-slate-50">
+                    <RadioGroupItem value="both" id="mode-both" />
+                    <Label
+                      htmlFor="mode-both"
+                      className="space-y-1 leading-tight"
+                    >
+                      <span className="block text-sm font-semibold">
+                        Both (ensemble)
+                      </span>
+                      <span className="block text-xs text-slate-600">
+                        Transformer as main model, XGBoost as supporting signal.
+                      </span>
+                    </Label>
+                  </div>
+                </RadioGroup>
+                <div className="flex items-center gap-2 mt-2 text-xs text-slate-600">
+                  <input
+                    id="toggle-blast"
+                    type="checkbox"
+                    className="h-3 w-3"
+                    checked={useBlast}
+                    onChange={(e) => setUseBlast(e.target.checked)}
                   />
+                  <Label htmlFor="toggle-blast" className="text-xs text-slate-600">
+                    Use BLAST naming for Transformer markers (slower)
+                  </Label>
                 </div>
-              )}
+              </div>
+              <TabsList className="grid w-full grid-cols-5 mb-8">
+                <TabsTrigger value="upload" disabled={isProcessing}>
+                  Genome Upload
+                </TabsTrigger>
+                <TabsTrigger value="database">
+                  Genome Database
+                </TabsTrigger>
+                <TabsTrigger value="results" disabled={!processedResult}>
+                  Results Dashboard
+                </TabsTrigger>
+                <TabsTrigger value="training">
+                  Model Training
+                </TabsTrigger>
+                <TabsTrigger value="training-status">
+                  Training Status
+                </TabsTrigger>
+              </TabsList>
 
-              {activeTab === "results" && (
-                <div className="revolut-card p-6">
-                  {processedResult ? (
-                    <ResultsDashboard
-                      sampleName={processedResult.genomeName}
-                      predictions={processedResult.predictions}
-                      analysisSummary={processedResult.analysisSummary}
-                      onNewUpload={handleReset}
-                    />
-                  ) : (
-                    <div className="text-center py-16">
-                      <div className="w-16 h-16 rounded-2xl revolut-gradient-green mx-auto mb-4 flex items-center justify-center">
-                        <BarChart3 className="w-8 h-8 text-white" />
-                      </div>
-                      <h3 className="text-xl font-semibold text-foreground mb-2">No Results Yet</h3>
-                      <p className="text-muted-foreground mb-6">Upload a genome sequence to see predictions</p>
-                      <button
-                        onClick={() => setActiveTab("upload")}
-                        className="revolut-button inline-flex items-center gap-2"
-                      >
-                        <Upload className="w-4 h-4" />
-                        Upload Genome
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
+              <TabsContent value="upload" className="mt-0">
+                <GenomeUploader
+                  onFileUpload={handleFileUpload}
+                  isProcessing={isProcessing}
+                />
+              </TabsContent>
 
-              {activeTab === "training" && (
-                <div className="revolut-card p-6">
-                  <TrainingPipeline onJobCreated={handleJobCreated} />
-                </div>
-              )}
+              <TabsContent value="database" className="mt-0">
+                <NCBIGenomeSearch
+                  onGenomeSelect={(genome) => {
+                    console.log('Selected genome:', genome);
+                  }}
+                  onSequenceDownload={(genome) => {
+                    console.log('Downloaded sequence for:', genome.organism);
+                  }}
+                  onBatchProcess={async (genomes) => {
+                    console.log(`Processing ${genomes.length} genomes`);
+                    // You can add batch processing logic here
+                    // For example, automatically upload each genome for prediction
+                    for (const genome of genomes) {
+                      if (genome.fastaContent) {
+                        // Create a File object from the FASTA content
+                        const blob = new Blob([genome.fastaContent], { type: 'text/plain' });
+                        const file = new File([blob], `${genome.organism}.fasta`, { type: 'text/plain' });
+                        // Process the genome
+                        await handleFileUpload(file);
+                      }
+                    }
+                  }}
+                />
+              </TabsContent>
 
-              {activeTab === "training-status" && (
-                <div className="space-y-6">
-                  {trainingJob && (
-                    <div className="revolut-card p-6">
-                      <TrainingStatus
-                        jobId={trainingJob.jobId}
-                        modelType={trainingJob.modelType}
-                        onNewTraining={handleNewTraining}
-                      />
-                    </div>
-                  )}
-                  <div className="revolut-card p-6">
-                    <TrainingHistory
-                      onSelectJob={(jobId, jobType) => {
-                        setTrainingJob({ jobId, modelType: jobType });
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-            </motion.div>
-          </AnimatePresence>
-        </div>
+              <TabsContent value="results" className="mt-0">
+                {processedResult && (
+                  <ResultsDashboard
+                    sampleName={processedResult.genomeName}
+                    predictions={processedResult.predictions}
+                    analysisSummary={processedResult.analysisSummary}
+                    onNewUpload={handleReset}
+                  />
+                )}
+              </TabsContent>
 
-        {/* Footer */}
-        <footer className="border-t border-border px-8 py-4 mt-auto">
-          <div className="flex items-center justify-between text-sm text-muted-foreground">
-            <p>Bacterial Antibiogram Predictor &copy; {new Date().getFullYear()}</p>
-            <p>AI-powered antibiotic resistance prediction</p>
-          </div>
+              <TabsContent value="training" className="mt-0">
+                <TrainingPipeline onJobCreated={handleJobCreated} />
+              </TabsContent>
+
+              <TabsContent value="training-status" className="mt-0 space-y-6">
+                {trainingJob && (
+                  <TrainingStatus
+                    jobId={trainingJob.jobId}
+                    modelType={trainingJob.modelType}
+                    onNewTraining={handleNewTraining}
+                  />
+                )}
+                <TrainingHistory
+                  onSelectJob={(jobId, jobType) => {
+                    setTrainingJob({ jobId, modelType: jobType });
+                  }}
+                />
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+
+        <footer className="mt-8 text-center text-sm text-slate-600">
+          <p>
+            Bacterial Antibiogram Predictor &copy; {new Date().getFullYear()}
+          </p>
+          <p className="mt-1">
+            Predicting antibiotic resistance from genomic data
+          </p>
         </footer>
-      </main>
+      </motion.div>
     </div>
   );
 };

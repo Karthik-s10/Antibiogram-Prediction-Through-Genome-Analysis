@@ -7,167 +7,104 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-transparent text-foreground;
     margin: 0;
     padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   }
   html {
-    @apply bg-background;
+    @apply bg-transparent;
   }
   
-  /* Revolut-style dark theme as default */
   :root {
-    --background: 0 0% 4%;           /* #0A0A0A - deep black */
-    --foreground: 0 0% 98%;          /* white text */
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
 
-    --card: 0 0% 7%;                 /* #121212 - card surface */
-    --card-foreground: 0 0% 98%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
 
-    --popover: 0 0% 9%;
-    --popover-foreground: 0 0% 98%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
 
-    --primary: 214 100% 50%;         /* #0066FF - Revolut blue */
-    --primary-foreground: 0 0% 100%;
+    --primary: 158 64% 52%;
+    --primary-foreground: 210 40% 98%;
 
-    --secondary: 0 0% 12%;           /* subtle dark gray */
-    --secondary-foreground: 0 0% 90%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
 
-    --muted: 0 0% 14%;
-    --muted-foreground: 0 0% 55%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
 
-    --accent: 158 64% 52%;           /* teal/green accent */
-    --accent-foreground: 0 0% 100%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
 
-    --destructive: 0 72% 51%;        /* red */
-    --destructive-foreground: 0 0% 100%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
 
-    --border: 0 0% 16%;              /* subtle borders */
-    --input: 0 0% 12%;
-    --ring: 214 100% 50%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 158 64% 52%;
 
-    --radius: 1rem;                  /* larger radius */
-    
-    /* Revolut custom colors */
-    --revolut-blue: 214 100% 50%;
-    --revolut-green: 158 64% 52%;
-    --revolut-purple: 270 60% 55%;
-    --revolut-orange: 25 95% 53%;
-    --revolut-pink: 330 80% 60%;
+    --radius: 0.75rem;
   }
 
-  /* Light mode (optional, keeping for accessibility) */
-  .light {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 9%;
-    --card: 0 0% 98%;
-    --card-foreground: 0 0% 9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 9%;
-    --primary: 214 100% 50%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 96%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96%;
-    --muted-foreground: 0 0% 45%;
-    --accent: 158 64% 52%;
-    --accent-foreground: 0 0% 100%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 0 0% 90%;
-    --input: 0 0% 90%;
-    --ring: 214 100% 50%;
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 210 40% 98%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 212.7 26.8% 83.9%;
   }
 }
 
 
 @layer components {
-  /* Revolut-style glass card */
-  .revolut-card {
-    @apply bg-card border border-border rounded-2xl transition-all duration-200;
-  }
-  
-  .revolut-card:hover {
-    @apply border-primary/30;
+  .gradient-border {
+    @apply border-2 border-transparent bg-gradient-to-r from-emerald-500 to-blue-500;
+    background-clip: padding-box;
   }
 
-  /* Revolut gradient backgrounds */
-  .revolut-gradient-blue {
-    background: linear-gradient(135deg, hsl(214, 100%, 50%) 0%, hsl(230, 100%, 60%) 100%);
-  }
-  
-  .revolut-gradient-green {
-    background: linear-gradient(135deg, hsl(158, 64%, 52%) 0%, hsl(170, 70%, 45%) 100%);
-  }
-  
-  .revolut-gradient-purple {
-    background: linear-gradient(135deg, hsl(270, 60%, 55%) 0%, hsl(290, 70%, 50%) 100%);
-  }
-  
-  .revolut-gradient-orange {
-    background: linear-gradient(135deg, hsl(25, 95%, 53%) 0%, hsl(35, 95%, 55%) 100%);
-  }
-  
-  .revolut-gradient-pink {
-    background: linear-gradient(135deg, hsl(330, 80%, 60%) 0%, hsl(350, 80%, 55%) 100%);
+  .fun-shadow {
+    box-shadow:
+      0 10px 25px -5px rgba(16, 185, 129, 0.3),
+      0 10px 10px -5px rgba(59, 130, 246, 0.2);
   }
 
-  /* Revolut button styles */
-  .revolut-button {
-    @apply bg-primary text-primary-foreground font-medium px-6 py-3 rounded-xl
-           transition-all duration-200 hover:brightness-110 active:scale-[0.98];
-  }
-  
-  .revolut-button-secondary {
-    @apply bg-secondary text-secondary-foreground font-medium px-6 py-3 rounded-xl
-           transition-all duration-200 hover:bg-secondary/80 active:scale-[0.98];
+  .animate-gradient {
+    background-size: 200% 200%;
+    animation: gradient 3s ease infinite;
   }
 
-  /* Revolut sidebar nav item */
-  .revolut-nav-item {
-    @apply flex items-center gap-3 px-4 py-3 rounded-xl text-muted-foreground
-           transition-all duration-200 hover:bg-secondary hover:text-foreground;
-  }
-  
-  .revolut-nav-item.active {
-    @apply bg-primary/10 text-primary;
-  }
-
-  /* Revolut subtle glow effects */
-  .revolut-glow-blue {
-    box-shadow: 0 0 60px rgba(0, 102, 255, 0.15);
-  }
-  
-  .revolut-glow-green {
-    box-shadow: 0 0 60px rgba(16, 185, 129, 0.15);
-  }
-
-  /* Smooth page transitions */
-  .page-transition {
-    @apply transition-all duration-300 ease-out;
-  }
-  
-  /* Feature card icon container */
-  .feature-icon {
-    @apply w-12 h-12 rounded-xl flex items-center justify-center;
-  }
-
-  /* Scrollbar styling for dark theme */
-  ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-  
-  ::-webkit-scrollbar-track {
-    background: hsl(0, 0%, 7%);
-  }
-  
-  ::-webkit-scrollbar-thumb {
-    background: hsl(0, 0%, 20%);
-    border-radius: 4px;
-  }
-  
-  ::-webkit-scrollbar-thumb:hover {
-    background: hsl(0, 0%, 30%);
+  @keyframes gradient {
+    0% {
+      background-position: 0% 50%;
+    }
+    50% {
+      background-position: 100% 50%;
+    }
+    100% {
+      background-position: 0% 50%;
+    }
   }
 }

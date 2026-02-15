@@ -24,7 +24,7 @@ warnings.filterwarnings(
 )
 
 from config import settings
-from api import training_routes, prediction_routes, status_routes
+from api import training_routes, prediction_routes, status_routes, explanation_routes
 from models.xgboost_trainer import XGBoostTrainer
 
 # Configure logging
@@ -70,6 +70,7 @@ app.add_middleware(
 app.include_router(training_routes.router, prefix="/api/train", tags=["Training"])
 app.include_router(prediction_routes.router, prefix="/api/predict", tags=["Prediction"])
 app.include_router(status_routes.router, prefix="/api/status", tags=["Status"])
+app.include_router(explanation_routes.router, tags=["Explanation"])
 
 
 @app.get("/")

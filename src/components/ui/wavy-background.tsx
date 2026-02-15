@@ -132,30 +132,26 @@ export const WavyBackground = ({
     };
 
     const render = () => {
-      ctx.fillStyle = backgroundFill;
+      // Create a more vibrant gradient background
+      const gradient = ctx.createLinearGradient(0, 0, w, h);
+      gradient.addColorStop(0, '#e0f2fe');  // Brighter light blue
+      gradient.addColorStop(0.4, '#ede9fe'); // Brighter light purple
+      gradient.addColorStop(0.7, '#fae8ff'); // Brighter light pink
+      gradient.addColorStop(1, '#f0f9ff');   // Soft blue-white
+      
+      ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, w, h);
-
-      const speedMultiplier = speed === "fast" ? 0.015 : 0.008;
-      timeRef.current += speedMultiplier;
-
-      // Draw multiple DNA strands with different colors and positions
-      const numStrands = 4;
-      for (let i = 0; i < numStrands; i++) {
-        const centerX = (w / (numStrands + 1)) * (i + 1);
-        const amplitude = (h / 6) * (0.8 + i * 0.2);
-        const frequency = waveWidth * (1.2 + i * 0.3);
-        const phase = timeRef.current * (1 + i * 0.3) + (i * Math.PI / 2);
-        const strandColor = colors[i % colors.length];
-        
-        drawDNAStrand(centerX, amplitude, frequency, phase, strandColor, 12 + i * 2);
-      }
-
-      ctx.globalAlpha = 1;
-
-      animationFrameId.current = requestAnimationFrame(render);
     };
 
     render();
+    
+    // Handle window resize
+    const handleResize = () => {
+      setCanvasSize();
+      render();
+    };
+    
+    window.addEventListener('resize', handleResize);
 
     return () => {
       window.removeEventListener("resize", setCanvasSize);

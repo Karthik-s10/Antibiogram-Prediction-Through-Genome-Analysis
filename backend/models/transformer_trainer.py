@@ -699,15 +699,15 @@ class DNABERTTrainer:
             attention_mask = attention_mask_cpu.to(self.device)
 
             for antibiotic, model in self.models.items():
-                # Predict for each gene for this antibiotic model
                 model.eval()
+
                 with torch.no_grad():
                     outputs = model(input_ids=input_ids, attention_mask=attention_mask)
                     logits = outputs.logits
                     probs = F.softmax(logits, dim=-1)
 
-                    # Gene-level predictions
-                    gene_predictions = torch.argmax(logits, dim=1).cpu().numpy()
+                # Gene-level predictions
+                gene_predictions = torch.argmax(logits, dim=1).cpu().numpy()
 
                 # Persist raw gene-level predictions (0=S,1=I,2=R) for explainability
                 try:
@@ -766,15 +766,13 @@ class DNABERTTrainer:
                 logger.error(f"Failed to load DNABERT model for {antibiotic} from {ab_dir}: {e}")
                 continue
 
-            # Move inputs to device for this antibiotic
-            input_ids = input_ids_cpu.to(run_device)
-            attention_mask = attention_mask_cpu.to(run_device)
-
             with torch.no_grad():
+                input_ids = input_ids_cpu.to(run_device)
+                attention_mask = attention_mask_cpu.to(run_device)
+                
                 outputs = model(input_ids=input_ids, attention_mask=attention_mask)
                 logits = outputs.logits
                 probs = F.softmax(logits, dim=-1)
-
                 gene_predictions = torch.argmax(logits, dim=1).cpu().numpy()
 
             try:

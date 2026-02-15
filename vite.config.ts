@@ -22,5 +22,12 @@ export default defineConfig({
   server: {
     // @ts-ignore
     allowedHosts: true,
+    proxy: {
+      '/api': {
+        target: 'https://api.ncbi.nlm.nih.gov',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+    },
   }
 });
