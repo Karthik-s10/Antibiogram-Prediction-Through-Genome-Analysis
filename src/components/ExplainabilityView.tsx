@@ -14,10 +14,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { InfoIcon, ZoomInIcon, ZoomOutIcon, Dna } from "lucide-react";
+import { InfoIcon, ZoomInIcon, ZoomOutIcon, Dna, RefreshCwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PredictionResult } from "@/lib/resistancePredictor";
 import DNAHelixVisualization from "./DNAHelixVisualization";
+import { ShapVisualization } from "./explanation/ShapVisualization";
+import { ForcePlot } from "./explanation/ForcePlot";
+import { ComparativeExplanation } from "./explanation/ComparativeExplanation";
 
 interface ExplainabilityViewProps {
   predictions?: PredictionResult[];
@@ -34,13 +37,112 @@ const ExplainabilityView: React.FC<ExplainabilityViewProps> = ({
     predictions[0]?.antibiotic || "",
   );
   const [zoomLevel, setZoomLevel] = useState<number>(1);
-  const [viewMode, setViewMode] = useState<"heatmap" | "network" | "dna-helix">("heatmap");
+  const [viewMode, setViewMode] = useState<"heatmap" | "network" | "dna-helix" | "shap" | "genetic-markers">("shap");
+  const [shapExplanation, setShapExplanation] = useState<any>(null);
+  const [isLoadingShap, setIsLoadingShap] = useState(false);
+  const [xgbExplanation, setXgbExplanation] = useState<any>(null);
+  const [dnabertExplanation, setDnabertExplanation] = useState<any>(null);
+
+  // Load sample SHAP explanations for demo
+  useEffect(() => {
+    const loadSampleExplanations = async () => {
+      try {
+        // Load XGBoost explanation
+        const xgbResponse = await fetch('/api/explanations/single', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            antibiotic: 'amikacin',
+            model_type: 'xgboost',
+            features: Array(1000).fill(0).map((_, i) => Math.random()),
+            prediction: 'R',
+            probability: 0.75
+          })
+        });
+        
+        if (xgbResponse.ok) {
+          const xgbData = await xgbResponse.json();
+          if (xgbData.success) {
+            setXgbExplanation(xgbData.explanation);
+          }
+        } else {
+          // Fallback to sample data
+          const sampleXgbResponse = await fetch('/data_cache/shap_explanations/working_xgboost_explanation.json');
+          if (sampleXgbResponse.ok) {
+            const sampleXgbData = await sampleXgbResponse.json();
+            setXgbExplanation(sampleXgbData);
+          }
+        }
+
+        // Load DNABERT explanation
+        const dnabertResponse = await fetch('/api/explanations/single', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            antibiotic: 'amikacin',
+            model_type: 'transformer',
+            sequence: 'ATCGATCGATCGATCGATCG',
+            prediction: 'S',
+            probability: 0.82
+          })
+        });
+        
+        if (dnabertResponse.ok) {
+          const dnabertData = await dnabertResponse.json();
+          if (dnabertData.success) {
+            setDnabertExplanation(dnabertData.explanation);
+          }
+        } else {
+          // Fallback to sample data
+          const sampleDnabertResponse = await fetch('/data_cache/shap_explanations/working_dnabert_explanation.json');
+          if (sampleDnabertResponse.ok) {
+            const sampleDnabertData = await sampleDnabertResponse.json();
+            setDnabertExplanation(sampleDnabertData);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading SHAP explanations:', error);
+      }
+    };
+
+    if (viewMode === 'shap') {
+      loadSampleExplanations();
+    }
+  }, [viewMode]);
+
+  const handleRefreshShap = async () => {
+    setIsLoadingShap(true);
+    try {
+      // Simulate API call to refresh explanations
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Reload sample explanations
+      const sampleXgbResponse = await fetch('/data_cache/shap_explanations/working_xgboost_explanation.json');
+      if (sampleXgbResponse.ok) {
+        const sampleXgbData = await sampleXgbResponse.json();
+        setXgbExplanation(sampleXgbData);
+      }
+      
+      const sampleDnabertResponse = await fetch('/data_cache/shap_explanations/working_dnabert_explanation.json');
+      if (sampleDnabertResponse.ok) {
+        const sampleDnabertData = await sampleDnabertResponse.json();
+        setDnabertExplanation(sampleDnabertData);
+      }
+    } catch (error) {
+      console.error('Error refreshing SHAP explanations:', error);
+    } finally {
+      setIsLoadingShap(false);
+    }
+  };
 
   const selectedData = predictions.find(
     (item) => item.antibiotic === selectedAntibiotic,
   );
-
-  const getPredictionColor = (prediction: "S" | "I" | "R") => {
+    const getPredictionColor = (prediction: "S" | "I" | "R") => {
     switch (prediction) {
       case "R":
         return "bg-red-500";
@@ -102,16 +204,15 @@ const ExplainabilityView: React.FC<ExplainabilityViewProps> = ({
           <Tabs
             defaultValue="heatmap"
             onValueChange={(value) =>
-              setViewMode(value as "heatmap" | "network" | "dna-helix")
+              setViewMode(value as "heatmap" | "network" | "dna-helix" | "shap" | "genetic-markers")
             }
           >
-            <TabsList>
-              <TabsTrigger value="heatmap">Heatmap View</TabsTrigger>
-              <TabsTrigger value="network">Network View</TabsTrigger>
-              <TabsTrigger value="dna-helix">
-                <Dna className="mr-2 h-4 w-4" />
-                DNA Helix
-              </TabsTrigger>
+            <TabsList className="grid w-full grid-cols-5">
+              <TabsTrigger value="heatmap">Heatmap</TabsTrigger>
+              <TabsTrigger value="network">Network</TabsTrigger>
+              <TabsTrigger value="dna-helix">DNA Helix</TabsTrigger>
+              <TabsTrigger value="shap">SHAP Analysis</TabsTrigger>
+              <TabsTrigger value="genetic-markers">Genetic Markers</TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
@@ -264,6 +365,142 @@ const ExplainabilityView: React.FC<ExplainabilityViewProps> = ({
               width={800}
               height={500}
             />
+          </div>
+        )}
+
+        {viewMode === "shap" && (
+          <div className="space-y-6">
+            {/* SHAP Controls */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between">
+                  SHAP Explanations
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRefreshShap}
+                    disabled={isLoadingShap}
+                  >
+                    <RefreshCwIcon className={`h-4 w-4 ${isLoadingShap ? 'animate-spin' : ''}`} />
+                    {isLoadingShap ? 'Loading...' : 'Refresh'}
+                  </Button>
+                </CardTitle>
+                <CardDescription>
+                  Model explainability using SHAP values for feature importance
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* XGBoost Explanation */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        XGBoost Explanation
+                        <Badge variant="outline">f0849bdd</Badge>
+                      </CardTitle>
+                      <CardDescription>
+                        Tree-based model with k-mer features
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {xgbExplanation ? (
+                        <ShapVisualization
+                          explanation={xgbExplanation}
+                          isLoading={isLoadingShap}
+                          onRefresh={handleRefreshShap}
+                        />
+                      ) : (
+                        <div className="text-center py-8">
+                          <InfoIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                          <p className="text-gray-500">No XGBoost explanation available</p>
+                          <p className="text-sm text-gray-400">
+                            Select an antibiotic and generate predictions
+                          </p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* DNABERT Explanation */}
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        DNABERT Explanation
+                        <Badge variant="outline">ce13dcc6</Badge>
+                      </CardTitle>
+                      <CardDescription>
+                        Transformer model with DNA sequence analysis
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {dnabertExplanation ? (
+                        <ShapVisualization
+                          explanation={dnabertExplanation}
+                          isLoading={isLoadingShap}
+                          onRefresh={handleRefreshShap}
+                        />
+                      ) : (
+                        <div className="text-center py-8">
+                          <InfoIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                          <p className="text-gray-500">No DNABERT explanation available</p>
+                          <p className="text-sm text-gray-400">
+                            Select an antibiotic and generate predictions
+                          </p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Comparative Analysis */}
+            {xgbExplanation && dnabertExplanation && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Comparative Analysis</CardTitle>
+                  <CardDescription>
+                    Compare XGBoost vs DNABERT explanations side-by-side
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ComparativeExplanation
+                    xgboostExplanation={xgbExplanation}
+                    transformerExplanation={dnabertExplanation}
+                    antibiotic={selectedAntibiotic}
+                  />
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Force Plots */}
+            {xgbExplanation && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>XGBoost Force Plot</CardTitle>
+                  <CardDescription>
+                    Interactive force plot showing feature contributions
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ForcePlot explanation={xgbExplanation} />
+                </CardContent>
+              </Card>
+            )}
+
+            {dnabertExplanation && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>DNABERT Force Plot</CardTitle>
+                  <CardDescription>
+                    Interactive force plot showing token contributions
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ForcePlot explanation={dnabertExplanation} />
+                </CardContent>
+              </Card>
+            )}
           </div>
         )}
 

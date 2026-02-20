@@ -23,12 +23,24 @@ export const AttentionVisualization: React.FC<AttentionVisualizationProps> = ({
   }
 
   // Get attention matrix for selected layer and head
-  const attentionMatrix = attention[selectedLayer][selectedHead];
+  const attentionMatrix = attention[selectedLayer]?.[selectedHead];
   const numLayers = attention.length;
-  const numHeads = attention[0].length;
+  const numHeads = attention[0]?.length || 0;
+  
+  // Check if attentionMatrix is valid
+  if (!attentionMatrix || !Array.isArray(attentionMatrix)) {
+    return <div>Invalid attention data for selected layer and head</div>;
+  }
 
   // Get max value for normalization
-  const maxValue = Math.max(...attentionMatrix.flat());
+  const maxValue = Math.max(
+    ...attentionMatrix.reduce((acc, row) => {
+      if (Array.isArray(row)) {
+        return [...acc, ...row];
+      }
+      return acc;
+    }, []).map(v => typeof v === 'number' ? v : 0)
+  );
 
   return (
     <div className="w-full">
@@ -97,7 +109,7 @@ export const AttentionVisualization: React.FC<AttentionVisualizationProps> = ({
             {attentionMatrix.map((row, i) => (
               <tr key={i}>
                 <td className="p-2 text-xs font-medium bg-gray-50">{tokens[i]}</td>
-                {row.map((value, j) => (
+                {Array.isArray(row) ? row.map((value, j) => (
                   <td
                     key={j}
                     className="p-1 text-center"
@@ -109,7 +121,11 @@ export const AttentionVisualization: React.FC<AttentionVisualizationProps> = ({
                   >
                     <span className="text-xs">{value.toFixed(2)}</span>
                   </td>
-                ))}
+                )) : (
+                  <td colSpan={tokens.length} className="p-2 text-center text-gray-500">
+                    Invalid row data
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>

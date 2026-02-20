@@ -1,0 +1,8 @@
+{
+  "job_id": "33d32430-b2bb-4875-8a04-82a10076f800_transformer",
+  "job_type": "transformer",
+  "generated_files": [
+    "transformer_overview.png",
+    "job_metadata.json"
+  ]
+}

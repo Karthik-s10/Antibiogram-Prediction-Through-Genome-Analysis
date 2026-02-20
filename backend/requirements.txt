@@ -52,5 +52,9 @@ python-dotenv==1.0.1
 pydantic==2.5.3
 pydantic-settings==2.1.0
 
+# Explainability
+shap==0.44.0
+plotly==5.17.0
+
 
 

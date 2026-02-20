@@ -70,7 +70,7 @@ app.add_middleware(
 app.include_router(training_routes.router, prefix="/api/train", tags=["Training"])
 app.include_router(prediction_routes.router, prefix="/api/predict", tags=["Prediction"])
 app.include_router(status_routes.router, prefix="/api/status", tags=["Status"])
-app.include_router(explanation_routes.router, tags=["Explanation"])
+app.include_router(explanation_routes.router, prefix="/api/explanations", tags=["Explanation"])
 
 
 @app.get("/")
