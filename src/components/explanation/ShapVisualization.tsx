@@ -1,11 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { InfoIcon, DownloadIcon, RefreshCwIcon, TrendingUpIcon, TrendingDownIcon } from "lucide-react";
+import {
+  InfoIcon, RefreshCwIcon, TrendingUpIcon, TrendingDownIcon,
+  SearchIcon, ChevronUpIcon, ChevronDownIcon, BarChart2Icon
+} from "lucide-react";
 
 interface ShapVisualizationProps {
   explanation: {
@@ -25,255 +29,349 @@ interface ShapVisualizationProps {
   onRefresh?: () => void;
 }
 
+// Map letter prediction to display
+const PRED_LABEL: Record<string, { label: string; color: string; bgColor: string }> = {
+  R: { label: 'Resistant', color: 'text-red-700', bgColor: 'bg-red-100 border-red-300' },
+  I: { label: 'Intermediate', color: 'text-amber-700', bgColor: 'bg-amber-100 border-amber-300' },
+  S: { label: 'Susceptible', color: 'text-green-700', bgColor: 'bg-green-100 border-green-300' },
+};
+
 export function ShapVisualization({ explanation, isLoading = false, onRefresh }: ShapVisualizationProps) {
-  const [activeTab, setActiveTab] = useState("importance");
-  const [topFeatures, setTopFeatures] = useState(15);
+  const [topFeatures, setTopFeatures] = useState(20);
+  const [search, setSearch] = useState('');
+  const [sortByAbs, setSortByAbs] = useState(true);
 
   if (!explanation || !explanation.shap_values || !explanation.feature_names) {
     return (
       <Card>
-        <CardContent className="p-6">
-          <div className="text-center text-gray-500">
-            <InfoIcon className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p>No SHAP data available</p>
-            <p className="text-sm mt-2">Generate model explanations to see feature importance</p>
+        <CardContent className="p-8">
+          <div className="text-center text-gray-400">
+            <BarChart2Icon className="h-14 w-14 mx-auto mb-4 opacity-30" />
+            <p className="font-medium">No SHAP data available</p>
+            <p className="text-sm mt-1">Generate model explanations to see feature importance</p>
           </div>
         </CardContent>
       </Card>
     );
   }
 
-  // Prepare data for visualization
-  const features = explanation.feature_names;
+  // ── Normalise SHAP values ──────────────────────────────────────────────────
   let shapValues: number[];
-  let baseValue: number;
-  
-  if (explanation.shap_values) {
-    if (Array.isArray(explanation.shap_values[0])) {
-      // Multi-class case: shap_values[0] is an array
-      shapValues = explanation.shap_values[0];
-    } else {
-      // Single class case: shap_values is a number array
-      shapValues = explanation.shap_values as number[];
-    }
+  if (Array.isArray(explanation.shap_values[0])) {
+    // multi-class: pick the R class slice if available, else first
+    const sv = explanation.shap_values as number[][];
+    const classIdx = explanation.class_names
+      ? Math.max(explanation.class_names.indexOf(explanation.prediction), 0)
+      : sv.length - 1;
+    shapValues = sv[classIdx] ?? sv[0];
   } else {
-    shapValues = [];
+    shapValues = explanation.shap_values as number[];
   }
-  
-  if (explanation.base_values) {
-    if (Array.isArray(explanation.base_values)) {
-      baseValue = explanation.base_values[0];
-    } else {
-      baseValue = explanation.base_values as number;
-    }
-  } else {
-    baseValue = 0;
-  }
-  
-  const data = features.map((f, i) => ({
-    feature: f,
-    value: shapValues[i],
-    absValue: Math.abs(shapValues[i]),
-    sign: shapValues[i] > 0 ? 'positive' : 'negative'
-  }))
-  .sort((a, b) => b.absValue - a.absValue)
-  .slice(0, topFeatures);
 
-  const maxValue = Math.max(...data.map(d => Math.abs(d.value)));
+  const baseValue = Array.isArray(explanation.base_values)
+    ? explanation.base_values[0]
+    : (explanation.base_values ?? 0);
 
-  const getFeatureDisplayName = (feature: string) => {
-    // Clean up feature names for display
-    if (feature.startsWith('kmer_')) {
-      return `k-mer: ${feature.substring(5)}`;
-    } else if (feature.startsWith('token_')) {
+  const predMeta = PRED_LABEL[explanation.prediction] ?? {
+    label: explanation.prediction, color: 'text-gray-700', bgColor: 'bg-gray-100 border-gray-300'
+  };
+
+  // ── Feature list ───────────────────────────────────────────────────────────
+  const allFeatures = useMemo(() => {
+    return explanation.feature_names.map((f, i) => ({
+      feature: f,
+      value: shapValues[i] ?? 0,
+      absValue: Math.abs(shapValues[i] ?? 0),
+      sign: (shapValues[i] ?? 0) >= 0 ? 'positive' : 'negative' as 'positive' | 'negative',
+    }));
+  }, [explanation.feature_names, shapValues]);
+
+  const sortedAll = useMemo(
+    () => sortByAbs
+      ? [...allFeatures].sort((a, b) => b.absValue - a.absValue)
+      : [...allFeatures].sort((a, b) => b.value - a.value),
+    [allFeatures, sortByAbs]
+  );
+
+  const topData = useMemo(() => sortedAll.slice(0, topFeatures), [sortedAll, topFeatures]);
+
+  const filteredSearch = useMemo(() => {
+    if (!search) return sortedAll.slice(0, 100);
+    return sortedAll.filter(f => f.feature.toLowerCase().includes(search.toLowerCase())).slice(0, 100);
+  }, [sortedAll, search]);
+
+  const maxValue = useMemo(() => Math.max(...topData.map(d => d.absValue), 1e-9), [topData]);
+
+  // ── Summary stats ──────────────────────────────────────────────────────────
+  const posSum = allFeatures.filter(f => f.value > 0).reduce((s, f) => s + f.value, 0);
+  const negSum = allFeatures.filter(f => f.value < 0).reduce((s, f) => s + f.value, 0);
+  const finalScore = baseValue + posSum + negSum;
+
+  const getDisplayName = (feature: string) => {
+    if (feature.startsWith('kmer_')) return `k-mer: ${feature.slice(5)}`;
+    if (feature.startsWith('token_')) {
       const parts = feature.split('_');
       return `Token ${parts[1]}: ${parts.slice(2).join('_')}`;
     }
     return feature;
   };
 
-  const getFeatureColor = (sign: string) => {
-    return sign === 'positive' ? 'bg-red-500' : 'bg-green-500';
-  };
-
-  const getFeatureTextColor = (sign: string) => {
-    return sign === 'positive' ? 'text-red-600' : 'text-green-600';
-  };
-
   return (
-    <Card className="w-full">
-      <CardHeader>
-        <div className="flex justify-between items-center">
+    <Card className="w-full border shadow-sm">
+      {/* ── Header ── */}
+      <CardHeader className="pb-3">
+        <div className="flex justify-between items-start flex-wrap gap-2">
           <div>
-            <CardTitle className="flex items-center gap-2">
-              Model Explainability
-              <Badge variant="outline">{explanation.model_type}</Badge>
-              <Badge variant="secondary">{explanation.antibiotic}</Badge>
+            <CardTitle className="flex items-center gap-2 text-lg">
+              SHAP Feature Importance
+              <Badge variant="outline" className="font-mono text-xs">{explanation.model_type}</Badge>
+              <Badge variant="secondary" className="text-xs">{explanation.antibiotic}</Badge>
             </CardTitle>
-            <CardDescription>
-              SHAP values show how each feature contributes to the prediction
+            <CardDescription className="mt-0.5">
+              SHAP values show how each feature drives the final prediction away from the baseline.
             </CardDescription>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={onRefresh} disabled={isLoading}>
-              <RefreshCwIcon className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
-            </Button>
+          <Button variant="outline" size="sm" onClick={onRefresh} disabled={isLoading}>
+            <RefreshCwIcon className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+          </Button>
+        </div>
+
+        {/* Prediction banner */}
+        <div className={`mt-3 rounded-xl border px-4 py-3 flex flex-wrap items-center gap-4 ${predMeta.bgColor}`}>
+          <div>
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Prediction</p>
+            <p className={`text-2xl font-bold ${predMeta.color}`}>
+              {predMeta.label}
+              <span className="text-base font-normal ml-1">({explanation.prediction})</span>
+            </p>
+          </div>
+          {explanation.probability != null && (
+            <div className="flex-1 min-w-[140px]">
+              <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Confidence</p>
+              <div className="flex items-center gap-2">
+                <Progress value={explanation.probability * 100} className="h-2 flex-1" />
+                <span className={`text-sm font-bold font-mono ${predMeta.color}`}>
+                  {(explanation.probability * 100).toFixed(1)}%
+                </span>
+              </div>
+            </div>
+          )}
+          <div className="text-xs text-gray-600 space-y-0.5">
+            <p>Baseline: <span className="font-mono font-medium">{baseValue.toFixed(4)}</span></p>
+            <p>+Impact: <span className="font-mono text-red-600">+{posSum.toFixed(4)}</span></p>
+            <p>−Impact: <span className="font-mono text-green-600">{negSum.toFixed(4)}</span></p>
+            <p>Final score: <span className="font-mono font-bold">{finalScore.toFixed(4)}</span></p>
           </div>
         </div>
       </CardHeader>
+
       <CardContent>
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="importance">Feature Importance</TabsTrigger>
-            <TabsTrigger value="waterfall">Waterfall Plot</TabsTrigger>
-            <TabsTrigger value="details">Details</TabsTrigger>
+        <Tabs defaultValue="chart" className="w-full">
+          <TabsList className="grid w-full grid-cols-3 mb-4">
+            <TabsTrigger value="chart">Bar Chart</TabsTrigger>
+            <TabsTrigger value="table">Feature Table</TabsTrigger>
+            <TabsTrigger value="details">Model Details</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="importance" className="space-y-4">
-            <div className="flex justify-between items-center">
-              <h4 className="text-lg font-semibold">Top {topFeatures} Feature Contributions</h4>
+          {/* ══ BAR CHART TAB ══ */}
+          <TabsContent value="chart" className="space-y-4">
+            {/* Controls */}
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-2">
-                <label className="text-sm font-medium">Features:</label>
-                <select 
-                  value={topFeatures} 
-                  onChange={(e) => setTopFeatures(Number(e.target.value))}
-                  className="border rounded px-2 py-1 text-sm"
+                <span className="text-sm font-medium text-gray-600">Show top</span>
+                <select
+                  value={topFeatures}
+                  onChange={e => setTopFeatures(Number(e.target.value))}
+                  className="border rounded px-2 py-1 text-sm bg-white shadow-sm"
                 >
-                  <option value={10}>Top 10</option>
-                  <option value={15}>Top 15</option>
-                  <option value={20}>Top 20</option>
-                  <option value={50}>Top 50</option>
+                  {[10, 15, 20, 30, 50].map(n => (
+                    <option key={n} value={n}>Top {n}</option>
+                  ))}
                 </select>
               </div>
+              <Button
+                variant="outline" size="sm"
+                onClick={() => setSortByAbs(!sortByAbs)}
+                className="text-xs"
+              >
+                Sort: {sortByAbs ? 'Absolute impact' : 'Signed value'}
+                {sortByAbs ? <ChevronDownIcon className="ml-1 h-3 w-3" /> : <ChevronUpIcon className="ml-1 h-3 w-3" />}
+              </Button>
             </div>
 
-            <div className="space-y-3">
-              {data.map((item, index) => (
-                <div key={index} className="flex items-center space-x-3">
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <span className="text-sm font-medium truncate" title={item.feature}>
-                      {getFeatureDisplayName(item.feature)}
-                    </span>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger>
-                          <InfoIcon className="h-3 w-3 text-gray-400 flex-shrink-0" />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p className="text-xs max-w-xs">{item.feature}</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </div>
-                  
-                  <div className="flex-1 bg-gray-200 rounded-full h-6 relative overflow-hidden min-w-0">
-                    <div
-                      className={`h-full transition-all duration-300 ${getFeatureColor(item.sign)}`}
-                      style={{
-                        width: `${(Math.abs(item.value) / maxValue) * 100}%`,
-                        marginLeft: item.sign === 'negative' ? 'auto' : '0',
-                        marginRight: item.sign === 'positive' ? 'auto' : '0'
-                      }}
-                    />
-                  </div>
-                  
-                  <div className="flex items-center gap-1 min-w-0">
-                    {item.sign === 'positive' ? (
-                      <TrendingUpIcon className="h-3 w-3 text-red-500 flex-shrink-0" />
-                    ) : (
-                      <TrendingDownIcon className="h-3 w-3 text-green-500 flex-shrink-0" />
-                    )}
-                    <span className={`text-sm font-mono text-right ${getFeatureTextColor(item.sign)}`}>
-                      {item.sign === 'positive' ? '+' : ''}{item.value.toFixed(3)}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-              <h5 className="font-semibold mb-2">Understanding SHAP Values</h5>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 bg-red-500 rounded"></div>
-                  <span>Features that <strong>increase</strong> resistance probability</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 bg-green-500 rounded"></div>
-                  <span>Features that <strong>decrease</strong> resistance probability</span>
-                </div>
+            {/* Legend */}
+            <div className="flex gap-4 text-xs text-gray-600">
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-3 rounded-sm bg-red-400" />
+                <span>Increases resistance risk</span>
               </div>
-              <p className="text-xs text-gray-600 mt-2">
-                Base value: {explanation.base_values?.toFixed(3)} | 
-                Prediction: {explanation.prediction} 
-                {explanation.probability && ` (${(explanation.probability * 100).toFixed(1)}%)`}
-              </p>
+              <div className="flex items-center gap-1.5">
+                <div className="w-3 h-3 rounded-sm bg-emerald-400" />
+                <span>Decreases resistance risk</span>
+              </div>
             </div>
-          </TabsContent>
 
-          <TabsContent value="waterfall" className="space-y-4">
-            {explanation.waterfall_plot_data ? (
-              <div>
-                <h4 className="text-lg font-semibold mb-4">Waterfall Plot</h4>
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span>Base Value:</span>
-                      <span className="font-mono">{explanation.waterfall_plot_data.base_value.toFixed(3)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm font-semibold">
-                      <span>Final Prediction:</span>
-                      <span className="font-mono">{explanation.waterfall_plot_data.final_prediction.toFixed(3)}</span>
-                    </div>
-                  </div>
-                  
-                  <div className="mt-4 space-y-2">
-                    {explanation.waterfall_plot_data.features?.slice(0, 10).map((feature: any, index: number) => (
-                      <div key={index} className="flex items-center justify-between text-sm">
-                        <span className="truncate mr-2">{getFeatureDisplayName(feature.feature)}</span>
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded ${getFeatureColor(feature.contribution_type)}`}></div>
-                          <span className={`font-mono ${getFeatureTextColor(feature.contribution_type)}`}>
-                            {feature.contribution_type === 'positive' ? '+' : ''}{feature.shap_value.toFixed(3)}
+            {/* Centered diverging bars */}
+            <div className="space-y-2">
+              {topData.map((item, idx) => {
+                const pct = (item.absValue / maxValue) * 50; // max 50% from center
+                return (
+                  <TooltipProvider key={idx}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="flex items-center gap-2 group cursor-default">
+                          {/* rank */}
+                          <span className="text-xs text-gray-400 w-4 text-right flex-shrink-0">{idx + 1}</span>
+                          {/* label */}
+                          <span className="text-xs font-medium w-36 truncate flex-shrink-0 text-right text-gray-700" title={item.feature}>
+                            {getDisplayName(item.feature)}
                           </span>
+                          {/* dual-sided bar */}
+                          <div className="flex-1 flex items-center h-5 relative">
+                            {/* center line */}
+                            <div className="absolute inset-y-0 left-1/2 w-px bg-gray-300 z-10" />
+                            {item.sign === 'negative' ? (
+                              <div className="flex-1 flex justify-center">
+                                <div
+                                  className="h-4 rounded-l bg-emerald-400 transition-all duration-300 ml-0"
+                                  style={{ width: `${pct}%`, marginLeft: `${50 - pct}%` }}
+                                />
+                                <div style={{ width: '50%' }} />
+                              </div>
+                            ) : (
+                              <div className="flex-1 flex justify-center">
+                                <div style={{ width: '50%' }} />
+                                <div
+                                  className="h-4 rounded-r bg-red-400 transition-all duration-300"
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                          {/* value + icon */}
+                          <div className="flex items-center gap-1 flex-shrink-0 w-20 justify-end">
+                            {item.sign === 'positive'
+                              ? <TrendingUpIcon className="h-3 w-3 text-red-500" />
+                              : <TrendingDownIcon className="h-3 w-3 text-emerald-500" />}
+                            <span className={`text-xs font-mono tabular-nums ${item.sign === 'positive' ? 'text-red-600' : 'text-emerald-600'}`}>
+                              {item.sign === 'positive' ? '+' : ''}{item.value.toFixed(4)}
+                            </span>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="right" className="max-w-xs text-xs">
+                        <p className="font-semibold break-all">{item.feature}</p>
+                        <p>SHAP: <span className="font-mono">{item.value.toFixed(6)}</span></p>
+                        <p>|SHAP|: <span className="font-mono">{item.absValue.toFixed(6)}</span></p>
+                        <p className="mt-1 text-gray-400">
+                          {item.sign === 'positive'
+                            ? '↑ Pushes prediction toward RESISTANCE'
+                            : '↓ Pushes prediction toward SUSCEPTIBILITY'}
+                        </p>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                );
+              })}
+            </div>
+
+            {/* Summary mini stats */}
+            <div className="mt-4 grid grid-cols-3 gap-3 text-center text-sm border-t pt-4">
+              <div className="bg-gray-50 rounded-lg p-2">
+                <p className="text-xs text-gray-500">Total features</p>
+                <p className="font-bold font-mono">{allFeatures.length.toLocaleString()}</p>
               </div>
-            ) : (
-              <div className="text-center text-gray-500 py-8">
-                <p>Waterfall plot data not available</p>
+              <div className="bg-red-50 rounded-lg p-2">
+                <p className="text-xs text-red-500">Resistance drivers</p>
+                <p className="font-bold font-mono text-red-700">
+                  {allFeatures.filter(f => f.value > 0).length.toLocaleString()}
+                </p>
               </div>
-            )}
+              <div className="bg-emerald-50 rounded-lg p-2">
+                <p className="text-xs text-emerald-600">Susceptibility drivers</p>
+                <p className="font-bold font-mono text-emerald-700">
+                  {allFeatures.filter(f => f.value < 0).length.toLocaleString()}
+                </p>
+              </div>
+            </div>
           </TabsContent>
 
+          {/* ══ TABLE TAB ══ */}
+          <TabsContent value="table" className="space-y-3">
+            <div className="relative">
+              <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                placeholder="Search features…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="pl-9 text-sm"
+              />
+            </div>
+            <div className="rounded-lg border overflow-auto max-h-[480px]">
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-gray-50 border-b">
+                  <tr>
+                    <th className="text-left px-3 py-2 font-semibold text-gray-600">#</th>
+                    <th className="text-left px-3 py-2 font-semibold text-gray-600">Feature</th>
+                    <th className="text-right px-3 py-2 font-semibold text-gray-600">SHAP value</th>
+                    <th className="text-right px-3 py-2 font-semibold text-gray-600">|SHAP|</th>
+                    <th className="text-center px-3 py-2 font-semibold text-gray-600">Direction</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredSearch.map((item, idx) => (
+                    <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-3 py-1.5 text-gray-400">{idx + 1}</td>
+                      <td className="px-3 py-1.5 font-mono max-w-[220px] truncate" title={item.feature}>
+                        {item.feature}
+                      </td>
+                      <td className={`px-3 py-1.5 text-right font-mono tabular-nums ${item.sign === 'positive' ? 'text-red-600' : 'text-emerald-600'}`}>
+                        {item.sign === 'positive' ? '+' : ''}{item.value.toFixed(6)}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono tabular-nums text-gray-700">
+                        {item.absValue.toFixed(6)}
+                      </td>
+                      <td className="px-3 py-1.5 text-center">
+                        {item.sign === 'positive'
+                          ? <Badge className="bg-red-100 text-red-700 text-[10px] px-1.5 py-0">↑ R</Badge>
+                          : <Badge className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0">↓ S</Badge>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {filteredSearch.length === 0 && (
+                <p className="text-center text-gray-400 py-8 text-sm">No features found</p>
+              )}
+            </div>
+          </TabsContent>
+
+          {/* ══ DETAILS TAB ══ */}
           <TabsContent value="details" className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Model Information</CardTitle>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-semibold">Prediction Summary</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
                   <div className="flex justify-between">
-                    <span>Model Type:</span>
+                    <span className="text-gray-500">Model type</span>
                     <Badge>{explanation.model_type}</Badge>
                   </div>
                   <div className="flex justify-between">
-                    <span>Antibiotic:</span>
+                    <span className="text-gray-500">Antibiotic</span>
                     <Badge variant="secondary">{explanation.antibiotic}</Badge>
                   </div>
                   <div className="flex justify-between">
-                    <span>Prediction:</span>
-                    <span className="font-semibold">{explanation.prediction}</span>
+                    <span className="text-gray-500">Prediction</span>
+                    <span className={`font-bold ${predMeta.color}`}>{predMeta.label} ({explanation.prediction})</span>
                   </div>
-                  {explanation.probability && (
-                    <div className="flex justify-between">
-                      <span>Confidence:</span>
+                  {explanation.probability != null && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-500">Confidence</span>
                       <div className="flex items-center gap-2">
-                        <Progress value={explanation.probability * 100} className="w-20" />
-                        <span className="font-mono">{(explanation.probability * 100).toFixed(1)}%</span>
+                        <Progress value={explanation.probability * 100} className="w-20 h-1.5" />
+                        <span className="font-mono text-xs">{(explanation.probability * 100).toFixed(2)}%</span>
                       </div>
                     </div>
                   )}
@@ -281,41 +379,39 @@ export function ShapVisualization({ explanation, isLoading = false, onRefresh }:
               </Card>
 
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Feature Statistics</CardTitle>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-semibold">SHAP Statistics</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm">
-                  <div className="flex justify-between">
-                    <span>Total Features:</span>
-                    <span className="font-mono">{explanation.feature_names.length}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>SHAP Values:</span>
-                    <span className="font-mono">{shapValues.length}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Max Impact:</span>
-                    <span className="font-mono">{maxValue.toFixed(3)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Base Value:</span>
-                    <span className="font-mono">{explanation.base_values?.toFixed(3)}</span>
-                  </div>
+                  {[
+                    ['Total features', allFeatures.length.toLocaleString()],
+                    ['SHAP values computed', shapValues.length.toLocaleString()],
+                    ['Baseline (f₀)', baseValue.toFixed(6)],
+                    ['Max positive SHAP', Math.max(...allFeatures.filter(f => f.value > 0).map(f => f.value), 0).toFixed(6)],
+                    ['Max negative SHAP', Math.min(...allFeatures.filter(f => f.value < 0).map(f => f.value), 0).toFixed(6)],
+                    ['Net effect (Σ SHAP)', (posSum + negSum).toFixed(6)],
+                    ['Final score', finalScore.toFixed(6)],
+                  ].map(([label, val]) => (
+                    <div key={label} className="flex justify-between">
+                      <span className="text-gray-500">{label}</span>
+                      <span className="font-mono text-xs">{val}</span>
+                    </div>
+                  ))}
                 </CardContent>
               </Card>
             </div>
 
             {explanation.metadata && (
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Technical Details</CardTitle>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-semibold">Technical Metadata</CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-                    {Object.entries(explanation.metadata).map(([key, value]) => (
-                      <div key={key} className="flex justify-between">
-                        <span className="capitalize">{key.replace(/_/g, ' ')}:</span>
-                        <span className="font-mono text-xs">{String(value)}</span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1 text-xs">
+                    {Object.entries(explanation.metadata).filter(([, v]) => typeof v !== 'object').map(([k, v]) => (
+                      <div key={k} className="flex justify-between py-1 border-b border-gray-50">
+                        <span className="text-gray-500 capitalize">{k.replace(/_/g, ' ')}</span>
+                        <span className="font-mono text-gray-700">{String(v)}</span>
                       </div>
                     ))}
                   </div>

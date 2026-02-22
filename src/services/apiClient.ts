@@ -150,6 +150,43 @@ export async function getXGBoostExplainability(modelName: string): Promise<any> 
 }
 
 /**
+ * Get SHAP explanation for a single prediction
+ */
+export async function getShapExplanation(
+  antibiotic: string,
+  modelType: 'xgboost' | 'transformer',
+  prediction: string,
+  probability: number,
+  sequence?: string,
+  features?: number[]
+): Promise<any> {
+  const payload: any = {
+    antibiotic,
+    model_type: modelType,
+    prediction,
+    probability
+  };
+  
+  if (sequence) payload.sequence = sequence;
+  if (features) payload.features = features;
+
+  const response = await fetch(`${API_BASE_URL}/api/explanations/single`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({ detail: 'Failed to fetch SHAP explanation' }));
+    throw new Error(error.detail || 'Failed to fetch SHAP explanation');
+  }
+
+  return response.json();
+}
+
+/**
  * Run BLAST for a list of k-mers (best-effort, requires Biopython on backend)
  */
 export async function blastKmers(

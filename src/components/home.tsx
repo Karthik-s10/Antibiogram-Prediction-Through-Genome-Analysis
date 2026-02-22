@@ -36,6 +36,7 @@ interface ProcessedResult {
   genomeName: string;
   predictions: PredictionResult[];
   analysisSummary: any;
+  sequence?: string;
 }
 
 interface TrainingJob {
@@ -59,6 +60,10 @@ const HomePage = () => {
     setIsProcessing(true);
 
     try {
+      // Read file to get sequence
+      const fileText = await file.text();
+      const sequence = fileText.split('\n').filter(line => !line.startsWith('>')).join('').replace(/\s/g, '').toUpperCase();
+
       // Import the API client
       const { predictResistance } = await import("@/services/apiClient");
 
@@ -94,14 +99,14 @@ const HomePage = () => {
               typeof m.normalized_importance === "number"
                 ? m.normalized_importance
                 : typeof m.importance === "number"
-                ? m.importance
-                : 0,
+                  ? m.importance
+                  : 0,
             confidence:
               typeof m.normalized_importance === "number"
                 ? m.normalized_importance
                 : typeof m.importance === "number"
-                ? m.importance
-                : 0,
+                  ? m.importance
+                  : 0,
             type: "gene",
           });
         });
@@ -119,8 +124,8 @@ const HomePage = () => {
               typeof m.normalized_importance === "number"
                 ? m.normalized_importance
                 : typeof m.importance === "number"
-                ? m.importance
-                : 0;
+                  ? m.importance
+                  : 0;
 
             markers.push({
               id: `tr-${p.antibiotic}-${idx}`,
@@ -140,18 +145,17 @@ const HomePage = () => {
           markers,
           classProbabilities: p.class_probabilities
             ? {
-                S: p.class_probabilities.S,
-                I: p.class_probabilities.I,
-                R: p.class_probabilities.R,
-              }
+              S: p.class_probabilities.S,
+              I: p.class_probabilities.I,
+              R: p.class_probabilities.R,
+            }
             : undefined,
-          reasoning: `Predicted ${
-            p.prediction === "R"
+          reasoning: `Predicted ${p.prediction === "R"
               ? "Resistant"
               : p.prediction === "I"
-              ? "Intermediate"
-              : "Susceptible"
-          } with ${(p.confidence * 100).toFixed(1)}% confidence based on genomic patterns.`,
+                ? "Intermediate"
+                : "Susceptible"
+            } with ${(p.confidence * 100).toFixed(1)}% confidence based on genomic patterns.`,
         };
       });
 
@@ -177,6 +181,7 @@ const HomePage = () => {
           similaritySearchRequired: apiResponse.analysis_summary.similarity_search_required,
           ensembleDetails: apiResponse.analysis_summary.ensemble_details,
         },
+        sequence,
       };
 
       setProcessedResult(result);
@@ -364,6 +369,7 @@ const HomePage = () => {
                     sampleName={processedResult.genomeName}
                     predictions={processedResult.predictions}
                     analysisSummary={processedResult.analysisSummary}
+                    sequence={processedResult.sequence}
                     onNewUpload={handleReset}
                   />
                 )}

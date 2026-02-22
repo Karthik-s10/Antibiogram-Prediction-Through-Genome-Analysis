@@ -18,7 +18,6 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import ExplainabilityView from "./ExplainabilityView";
-import { ModelExplanation } from "./explanation/ModelExplanation";
 import { PredictionResult } from "@/lib/resistancePredictor";
 
 interface ResultsDashboardProps {
@@ -40,7 +39,7 @@ const ResultsDashboard = ({
   predictions = [],
   analysisSummary,
   timestamp = new Date().toLocaleString(),
-  onNewUpload = () => {},
+  onNewUpload = () => { },
   sampleData,
   sequence,
   modelType,
@@ -205,10 +204,9 @@ const ResultsDashboard = ({
             onValueChange={setActiveTab}
             className="w-full"
           >
-            <TabsList className="grid w-full grid-cols-3 mb-8">
+            <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="profile">Resistance Profile</TabsTrigger>
-              <TabsTrigger value="explainability">Genetic Markers</TabsTrigger>
-              <TabsTrigger value="model-explanation">Model Explanation</TabsTrigger>
+              <TabsTrigger value="explainability">SHAP & Markers</TabsTrigger>
             </TabsList>
 
             <TabsContent value="profile" className="space-y-4">
@@ -216,7 +214,7 @@ const ResultsDashboard = ({
                 {predictions.map((prediction, index) => {
                   const ensemble =
                     analysisSummary?.ensembleDetails?.per_antibiotic?.[
-                      prediction.antibiotic
+                    prediction.antibiotic
                     ];
 
                   const confidenceTier = getConfidenceTier(prediction.confidence);
@@ -224,8 +222,8 @@ const ResultsDashboard = ({
                     confidenceTier === "high"
                       ? "High confidence"
                       : confidenceTier === "moderate"
-                      ? "Moderate confidence"
-                      : "Low / uncertain confidence";
+                        ? "Moderate confidence"
+                        : "Low / uncertain confidence";
 
                   const riskScore = getResistanceRisk(prediction);
 
@@ -361,11 +359,10 @@ const ResultsDashboard = ({
 
                         {ensemble && (
                           <div
-                            className={`mt-2 rounded-md p-2 border ${
-                              modelsDisagree
-                                ? "bg-amber-50 border-amber-300"
-                                : "bg-slate-50 border-slate-200"
-                            }`}
+                            className={`mt-2 rounded-md p-2 border ${modelsDisagree
+                              ? "bg-amber-50 border-amber-300"
+                              : "bg-slate-50 border-slate-200"
+                              }`}
                           >
                             <p className="font-semibold mb-1 text-slate-800 text-[11px]">
                               Model contributions
@@ -506,41 +503,20 @@ const ResultsDashboard = ({
                         ))}
                       </div>
                       <p className="mt-4 text-sm text-gray-600">
-                        💡 These genomes share similar k-mer patterns with your uploaded genome. 
+                        💡 These genomes share similar k-mer patterns with your uploaded genome.
                         The prediction is based on resistance patterns observed in these and other training samples.
                       </p>
                     </CardContent>
                   </Card>
                 )}
-                
+
                 {/* Explainability View */}
                 <ExplainabilityView
                   predictions={predictions}
                   genomeId={sampleName}
                   analysisSummary={analysisSummary}
+                  sequence={sequence}
                 />
-              </div>
-            </TabsContent>
-            
-            <TabsContent value="model-explanation">
-              <div className="space-y-6">
-                {sampleData && (
-                  <ModelExplanation
-                    sampleData={sampleData}
-                    sequence={sequence}
-                    modelType={modelType || 'xgboost'}
-                    featureNames={featureNames}
-                  />
-                )}
-                {!sampleData && (
-                  <Card>
-                    <CardContent className="text-center py-8">
-                      <p className="text-muted-foreground">
-                        No sample data available for model explanation.
-                      </p>
-                    </CardContent>
-                  </Card>
-                )}
               </div>
             </TabsContent>
           </Tabs>

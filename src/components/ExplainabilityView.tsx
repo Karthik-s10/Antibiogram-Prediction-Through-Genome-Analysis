@@ -17,6 +17,7 @@ import {
 import { InfoIcon, ZoomInIcon, ZoomOutIcon, Dna, RefreshCwIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PredictionResult } from "@/lib/resistancePredictor";
+import { getShapExplanation } from "@/services/apiClient";
 import DNAHelixVisualization from "./DNAHelixVisualization";
 import { ShapVisualization } from "./explanation/ShapVisualization";
 import { ForcePlot } from "./explanation/ForcePlot";
@@ -26,12 +27,14 @@ interface ExplainabilityViewProps {
   predictions?: PredictionResult[];
   genomeId?: string;
   analysisSummary?: any;
+  sequence?: string;
 }
 
 const ExplainabilityView: React.FC<ExplainabilityViewProps> = ({
   predictions = [],
   genomeId = "Sample_123456",
   analysisSummary,
+  sequence,
 }) => {
   const [selectedAntibiotic, setSelectedAntibiotic] = useState<string>(
     predictions[0]?.antibiotic || "",
@@ -43,106 +46,103 @@ const ExplainabilityView: React.FC<ExplainabilityViewProps> = ({
   const [xgbExplanation, setXgbExplanation] = useState<any>(null);
   const [dnabertExplanation, setDnabertExplanation] = useState<any>(null);
 
-  // Load sample SHAP explanations for demo
+  // Load actual SHAP explanations mapping sequence dynamically
   useEffect(() => {
-    const loadSampleExplanations = async () => {
+    const loadShapExplanations = async () => {
       try {
-        // Load XGBoost explanation
-        const xgbResponse = await fetch('/api/explanations/single', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            antibiotic: 'amikacin',
-            model_type: 'xgboost',
-            features: Array(1000).fill(0).map((_, i) => Math.random()),
-            prediction: 'R',
-            probability: 0.75
-          })
-        });
-        
-        if (xgbResponse.ok) {
-          const xgbData = await xgbResponse.json();
-          if (xgbData.success) {
-            setXgbExplanation(xgbData.explanation);
+        setIsLoadingShap(true);
+        const predictionData = predictions.find(p => p.antibiotic === selectedAntibiotic);
+
+        let xgbPrediction = 'Unknown';
+        let xgbProb = 0.5;
+        let transPrediction = 'Unknown';
+        let transProb = 0.5;
+
+        if (predictionData) {
+          const abAnalysis = analysisSummary?.ensembleDetails?.per_antibiotic?.[selectedAntibiotic];
+          if (abAnalysis?.xgboost) {
+            xgbPrediction = abAnalysis.xgboost.prediction;
+            xgbProb = abAnalysis.xgboost.confidence;
+          } else {
+            xgbPrediction = predictionData.prediction;
+            xgbProb = predictionData.confidence;
           }
-        } else {
-          // Fallback to sample data
-          const sampleXgbResponse = await fetch('/data_cache/shap_explanations/working_xgboost_explanation.json');
-          if (sampleXgbResponse.ok) {
-            const sampleXgbData = await sampleXgbResponse.json();
-            setXgbExplanation(sampleXgbData);
+
+          if (abAnalysis?.transformer) {
+            transPrediction = abAnalysis.transformer.prediction;
+            transProb = abAnalysis.transformer.confidence;
+          } else {
+            transPrediction = predictionData.prediction;
+            transProb = predictionData.confidence;
           }
         }
 
+        // Load XGBoost explanation
+        try {
+          const xgbData = await getShapExplanation(
+            selectedAntibiotic,
+            'xgboost',
+            xgbPrediction,
+            xgbProb,
+            sequence
+          );
+          if (xgbData.success) {
+            setXgbExplanation(xgbData.explanation);
+          } else {
+            setXgbExplanation(null);
+          }
+        } catch (error) {
+          console.error('Error loading XGBoost SHAP:', error);
+          setXgbExplanation(null);
+        }
+
         // Load DNABERT explanation
-        const dnabertResponse = await fetch('/api/explanations/single', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            antibiotic: 'amikacin',
-            model_type: 'transformer',
-            sequence: 'ATCGATCGATCGATCGATCG',
-            prediction: 'S',
-            probability: 0.82
-          })
-        });
-        
-        if (dnabertResponse.ok) {
-          const dnabertData = await dnabertResponse.json();
+        try {
+          const dnabertData = await getShapExplanation(
+            selectedAntibiotic,
+            'transformer',
+            transPrediction,
+            transProb,
+            sequence
+          );
           if (dnabertData.success) {
             setDnabertExplanation(dnabertData.explanation);
+          } else {
+            setDnabertExplanation(null);
           }
-        } else {
-          // Fallback to sample data
-          const sampleDnabertResponse = await fetch('/data_cache/shap_explanations/working_dnabert_explanation.json');
-          if (sampleDnabertResponse.ok) {
-            const sampleDnabertData = await sampleDnabertResponse.json();
-            setDnabertExplanation(sampleDnabertData);
-          }
+        } catch (error) {
+          console.error('Error loading DNABERT SHAP:', error);
+          setDnabertExplanation(null);
         }
       } catch (error) {
-        console.error('Error loading SHAP explanations:', error);
+        console.error('Error processing SHAP explanations request:', error);
+      } finally {
+        setIsLoadingShap(false);
       }
     };
 
     if (viewMode === 'shap') {
-      loadSampleExplanations();
+      loadShapExplanations();
     }
-  }, [viewMode]);
+  }, [viewMode, selectedAntibiotic, sequence, predictions, analysisSummary]);
 
   const handleRefreshShap = async () => {
+    // Simply clear cache/reset viewMode or re-trigger the state so useEffect runs
+    setXgbExplanation(null);
+    setDnabertExplanation(null);
+    // Let the useEffect handle the loading since viewMode is still 'shap'
     setIsLoadingShap(true);
-    try {
-      // Simulate API call to refresh explanations
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Reload sample explanations
-      const sampleXgbResponse = await fetch('/data_cache/shap_explanations/working_xgboost_explanation.json');
-      if (sampleXgbResponse.ok) {
-        const sampleXgbData = await sampleXgbResponse.json();
-        setXgbExplanation(sampleXgbData);
-      }
-      
-      const sampleDnabertResponse = await fetch('/data_cache/shap_explanations/working_dnabert_explanation.json');
-      if (sampleDnabertResponse.ok) {
-        const sampleDnabertData = await sampleDnabertResponse.json();
-        setDnabertExplanation(sampleDnabertData);
-      }
-    } catch (error) {
-      console.error('Error refreshing SHAP explanations:', error);
-    } finally {
-      setIsLoadingShap(false);
-    }
+    setTimeout(() => {
+      // Re-trigger by toggling viewMode briefly
+      setViewMode("heatmap");
+      setTimeout(() => setViewMode("shap"), 50);
+    }, 10);
   };
 
   const selectedData = predictions.find(
     (item) => item.antibiotic === selectedAntibiotic,
   );
-    const getPredictionColor = (prediction: "S" | "I" | "R") => {
+  const getPredictionColor = (prediction: "S" | "I" | "R") => {
     switch (prediction) {
       case "R":
         return "bg-red-500";
