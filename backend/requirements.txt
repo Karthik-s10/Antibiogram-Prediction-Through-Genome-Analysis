@@ -34,27 +34,27 @@ torchvision>=0.15.0
 torchaudio>=2.0.0
 
 datasets==2.16.1
-scikit-learn==1.4.0
-scipy==1.11.4
-pandas==2.2.0
-numpy==1.26.3
-accelerate==0.26.1
+scikit-learn>=1.4.0
+scipy>=1.11.4
+pandas>=2.2.0
+numpy>=1.26.3
+accelerate>=0.26.1
 
 # Bioinformatics
 biopython==1.83
 
 # Database and storage
-qdrant-client==1.7.3
-supabase==2.3.4
+qdrant-client>=1.7.3
+supabase>=2.3.4
 
 # Utilities
-python-dotenv==1.0.1
-pydantic==2.5.3
-pydantic-settings==2.1.0
+python-dotenv>=1.0.1
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
 
 # Explainability
-shap==0.44.0
-plotly==5.17.0
+shap>=0.50.0
+plotly>=5.17.0
 
 
 

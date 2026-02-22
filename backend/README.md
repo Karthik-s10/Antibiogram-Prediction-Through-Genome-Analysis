@@ -78,7 +78,20 @@ FastAPI backend for training and predicting antibiotic resistance from bacterial
    SUPABASE_URL=https://your-project.supabase.co
    SUPABASE_KEY=your_key
    FRONTEND_URL=http://localhost:5173
+   
+   # BLAST Configuration (Optional)
+   # 'off' | 'ncbi' | 'local'
+   BLAST_MODE=off
+   # For 'ncbi' mode:
+   NCBI_EMAIL=your.email@example.com
+   # For 'local' mode:
+   BLAST_LOCAL_DB=/path/to/nt_database
    ```
+   
+### BLAST Integration (Optional)
+To provide detailed gene markers for Transformer predictions, the application can use BLAST to assign identities. This is toggled in the UI, but requires server configuration:
+1. **NCBI Mode** (`BLAST_MODE=ncbi`): Queries the public NCBI `qblast` API. Slower, and requires a valid `NCBI_EMAIL` in `.env` to prevent throttling.
+2. **Local Mode** (`BLAST_MODE=local`): Requires installing the standalone **NCBI BLAST+** tool suite and downloading a local nucleotide (`nt`) database. Point `BLAST_LOCAL_DB` to the built database path. Fast and reliable for large batches.
 
 ### Running the Server
 

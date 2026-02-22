@@ -2,10 +2,10 @@
 SHAP utilities for model explainability.
 Common functions and data structures for SHAP explanations.
 """
-import numpy as np
-import pandas as pd
+import numpy as np  # type: ignore
+import pandas as pd  # type: ignore
 from typing import Dict, List, Tuple, Optional, Any, Union
-import shap
+import shap  # type: ignore
 import logging
 from dataclasses import dataclass
 import json
@@ -54,11 +54,11 @@ class SHAPUtils:
         feature_importance = list(zip(feature_names, mean_abs_shap))
         feature_importance.sort(key=lambda x: x[1], reverse=True)
         
-        return feature_importance[:top_k]
+        return feature_importance[:top_k]  # type: ignore
     
     def create_force_plot_data(self, explanation: SHAPExplanation) -> Dict[str, Any]:
         """Create data structure for force plot visualization."""
-        if len(explanation.shap_values.shape) > 1:
+        if hasattr(explanation.shap_values, 'shape') and len(explanation.shap_values.shape) > 1:  # type: ignore
             # Multi-class case
             shap_vals = explanation.shap_values[0]  # Use first class
         else:
@@ -69,8 +69,8 @@ class SHAPUtils:
         )
         
         return {
-            'base_value': float(explanation.base_values) if np.isscalar(explanation.base_values) else explanation.base_values.tolist(),
-            'shap_values': shap_vals.tolist(),
+            'base_value': float(explanation.base_values) if np.isscalar(explanation.base_values) else explanation.base_values.tolist(),  # type: ignore
+            'shap_values': shap_vals.tolist() if hasattr(shap_vals, 'tolist') else shap_vals,  # type: ignore
             'feature_names': explanation.feature_names,
             'feature_importance': feature_importance,
             'prediction': explanation.prediction,
@@ -85,7 +85,7 @@ class SHAPUtils:
         all_feature_names = []
         
         for exp in explanations:
-            if len(exp.shap_values.shape) > 1:
+            if hasattr(exp.shap_values, 'shape') and len(exp.shap_values.shape) > 1:  # type: ignore
                 shap_vals = exp.shap_values[0]
             else:
                 shap_vals = exp.shap_values
@@ -116,20 +116,20 @@ class SHAPUtils:
         summary_importance.sort(key=lambda x: x['abs_mean_importance'], reverse=True)
         
         return {
-            'feature_importance': summary_importance[:50],  # Top 50 features
+            'feature_importance': summary_importance[:50],  # type: ignore
             'total_features': len(feature_importance),
             'total_explanations': len(explanations)
         }
     
     def create_waterfall_plot_data(self, explanation: SHAPExplanation) -> Dict[str, Any]:
         """Create data structure for waterfall plot visualization."""
-        if len(explanation.shap_values.shape) > 1:
+        if hasattr(explanation.shap_values, 'shape') and len(explanation.shap_values.shape) > 1:  # type: ignore
             shap_vals = explanation.shap_values[0]
         else:
             shap_vals = explanation.shap_values
             
         # Get base value
-        base_value = float(explanation.base_values) if np.isscalar(explanation.base_values) else explanation.base_values[0]
+        base_value = float(explanation.base_values) if np.isscalar(explanation.base_values) else explanation.base_values[0]  # type: ignore
         
         # Calculate cumulative sum for waterfall plot
         cumulative_values = []
@@ -174,9 +174,9 @@ class SHAPUtils:
     def format_explanation_for_frontend(self, explanation: SHAPExplanation) -> Dict[str, Any]:
         """Format explanation data for frontend consumption."""
         return {
-            'shap_values': explanation.shap_values.tolist() if hasattr(explanation.shap_values, 'tolist') else explanation.shap_values,
+            'shap_values': explanation.shap_values.tolist() if hasattr(explanation.shap_values, 'tolist') else explanation.shap_values,  # type: ignore
             'feature_names': explanation.feature_names,
-            'base_values': explanation.base_values.tolist() if hasattr(explanation.base_values, 'tolist') else explanation.base_values,
+            'base_values': explanation.base_values.tolist() if hasattr(explanation.base_values, 'tolist') else explanation.base_values,  # type: ignore
             'prediction': explanation.prediction,
             'probability': explanation.probability,
             'model_type': explanation.model_type,

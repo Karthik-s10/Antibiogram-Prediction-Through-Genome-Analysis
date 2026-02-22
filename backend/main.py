@@ -2,12 +2,16 @@
 FastAPI main application for Antibiotic Resistance Prediction ML Pipeline.
 Provides endpoints for model training, prediction, and status monitoring.
 """
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi import FastAPI, Request  # type: ignore
+from fastapi.middleware.cors import CORSMiddleware  # type: ignore
+from fastapi.responses import JSONResponse, Response  # type: ignore
 from contextlib import asynccontextmanager
 import logging
 import warnings
+import os
+
+# Fix native Windows PyTorch/XGBoost OpenMP DLL initialization crash
+os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
 
 # Suppress noisy FutureWarning from transformers / torch._pytree
 warnings.filterwarnings(
@@ -23,9 +27,9 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
-from config import settings
-from api import training_routes, prediction_routes, status_routes, explanation_routes
-from models.xgboost_trainer import XGBoostTrainer
+from config import settings  # type: ignore
+from api import training_routes, prediction_routes, status_routes, explanations, explanation_routes  # type: ignore
+from models.xgboost_trainer import XGBoostTrainer  # type: ignore
 
 # Configure logging
 logging.basicConfig(
@@ -42,6 +46,14 @@ async def lifespan(app: FastAPI):
     logger.info("Starting ML Pipeline API...")
     logger.info(f"Model storage path: {settings.model_storage_path}")
     logger.info(f"Frontend URL: {settings.frontend_url}")
+    
+    # Initialize SHAP explainers 
+    try:
+        from api.explanations import initialize_explainers  # type: ignore
+        initialize_explainers()
+        logger.info("SHAP explainers initialized successfully")
+    except Exception as exc:
+        logger.warning(f"SHAP explainer init failed (non-fatal): {exc}")
     
     yield
     
@@ -71,6 +83,7 @@ app.include_router(training_routes.router, prefix="/api/train", tags=["Training"
 app.include_router(prediction_routes.router, prefix="/api/predict", tags=["Prediction"])
 app.include_router(status_routes.router, prefix="/api/status", tags=["Status"])
 app.include_router(explanation_routes.router, prefix="/api/explanations", tags=["Explanation"])
+app.include_router(explanations.router)
 
 
 @app.get("/")
@@ -104,7 +117,8 @@ async def gpu_status():
     Get GPU status and availability information.
     Returns detailed information about GPU availability for training.
     """
-    gpu_info = {
+    from typing import Dict, Any
+    gpu_info: Dict[str, Any] = {
         "gpu_available": False,
         "gpu_type": None,
         "gpu_name": None,
@@ -124,7 +138,7 @@ async def gpu_status():
     
     # Try PyTorch first (supports NVIDIA CUDA, AMD ROCm, Intel, Apple MPS)
     try:
-        import torch
+        import torch  # type: ignore
         if torch.cuda.is_available():
             gpu_detected = True
             gpu_name = torch.cuda.get_device_name(0)
@@ -155,7 +169,7 @@ async def gpu_status():
                         break
                 if not gpu_name:
                     gpu_name = "NVIDIA GPU (detected via nvidia-smi)"
-                gpu_info["details"]["nvidia_smi_output"] = result.stdout[:500]  # First 500 chars
+                gpu_info["details"]["nvidia_smi_output"] = str(result.stdout)[:500]  # type: ignore
         except Exception as e:
             pass
     
@@ -216,7 +230,7 @@ async def gpu_status():
     
     # Check Transformer (DNABERT) GPU support
     try:
-        from models.transformer_trainer import DNABERTTrainer
+        from models.transformer_trainer import DNABERTTrainer  # type: ignore
         transformer_trainer = DNABERTTrainer()
         gpu_info["transformer_gpu_support"] = transformer_trainer.device.type == 'cuda'
         if transformer_trainer.device.type == 'cuda':
@@ -255,7 +269,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 if __name__ == "__main__":
-    import uvicorn
+    import uvicorn  # type: ignore
     uvicorn.run(
         "main:app",
         host="0.0.0.0",

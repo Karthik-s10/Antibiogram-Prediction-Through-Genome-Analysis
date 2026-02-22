@@ -2,11 +2,11 @@
 DNABERT Transformer trainer for antibiotic resistance prediction.
 Uses Hugging Face transformers library with fine-tuning.
 """
-import numpy as np
-import pandas as pd
+import numpy as np  # type: ignore
+import pandas as pd  # type: ignore
 from typing import Dict, List, Tuple, Optional
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import f1_score, accuracy_score, jaccard_score, classification_report
+from sklearn.model_selection import train_test_split  # type: ignore
+from sklearn.metrics import f1_score, accuracy_score, jaccard_score, classification_report  # type: ignore
 import pickle
 import json
 import os
@@ -16,7 +16,7 @@ import time
 
 # Import torch with error handling for DLL loading issues
 try:
-    import torch
+    import torch  # type: ignore
     TORCH_AVAILABLE = True
     # Try to access CUDA to see if DLLs load correctly
     # DLL loading errors can happen at import or when accessing CUDA
@@ -56,7 +56,7 @@ except (ImportError, OSError, RuntimeError, Exception) as e:
         logging.error(f"Error importing PyTorch ({error_type}): {error_msg}")
 
 try:
-    from transformers import (
+    from transformers import (  # type: ignore
         AutoTokenizer,
         AutoModelForSequenceClassification,
         TrainingArguments,
@@ -64,8 +64,8 @@ try:
         EarlyStoppingCallback,
         TrainerCallback,
     )
-    from transformers.models.bert.configuration_bert import BertConfig
-    from datasets import Dataset
+    from transformers.models.bert.configuration_bert import BertConfig  # type: ignore
+    from datasets import Dataset  # type: ignore
     TRANSFORMERS_AVAILABLE = True
 except ImportError as e:
     TRANSFORMERS_AVAILABLE = False
@@ -75,7 +75,7 @@ except ImportError as e:
         logging.error(f"Transformers library not available: {e}")
         logging.error("Install with: pip install transformers datasets")
 
-from config import settings
+from config import settings  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +122,7 @@ class DNABERTEpochLoggingCallback(TrainerCallback):
             )
 
     def on_epoch_end(self, args, state, control, **kwargs):
-        elapsed = (time.time() - self.epoch_start_time) if self.epoch_start_time is not None else 0.0
+        elapsed = (time.time() - self.epoch_start_time) if self.epoch_start_time is not None else 0.0  # type: ignore
         current_epoch = int(state.epoch) if state.epoch is not None else 0
         global_step = int(getattr(state, "global_step", 0) or 0)
         max_steps = self.max_steps or int(getattr(state, "max_steps", 0) or 0)
@@ -133,7 +133,7 @@ class DNABERTEpochLoggingCallback(TrainerCallback):
         max_steps_str = str(max_steps) if max_steps > 0 else "?"
         logger.info(
             f"{self.antibiotic} - Completed epoch {current_epoch}/{self.total_epochs} "
-            f"in {elapsed/60:.1f} min "
+            f"in {elapsed/60:.1f} min "  # type: ignore
             f"(global step {global_step}/{max_steps_str}, "
             f"overall {progress_pct:.1f}% of planned training steps)"
         )
@@ -191,7 +191,7 @@ class DNABERTTrainer:
         self.kmer_size = kmer_size
         
         self.tokenizer = None
-        self.models: Dict[str, any] = {}
+        self.models: Dict[str, any] = {}  # type: ignore
         self.antibiotic_names: List[str] = []
         self.antibiotic_model_paths: Dict[str, str] = {}
         self.model_base_dir: Optional[str] = None
@@ -244,7 +244,7 @@ class DNABERTTrainer:
     def train_per_antibiotic(
         self,
         gene_df: pd.DataFrame,
-        progress_callback: Optional[callable] = None
+        progress_callback: Optional[callable] = None  # type: ignore
     ) -> Dict[str, Dict]:
         """
         Train a separate DNABERT model for each antibiotic.
@@ -274,7 +274,7 @@ class DNABERTTrainer:
             # Check for cancellation before training each antibiotic
             if progress_callback:
                 try:
-                    progress_callback(0, f"Preparing to train DNABERT for {antibiotic}...")
+                    progress_callback(0, f"Preparing to train DNABERT for {antibiotic}...")  # type: ignore
                 except InterruptedError:
                     logger.warning(f"Training cancelled before {antibiotic}")
                     break
@@ -310,7 +310,7 @@ class DNABERTTrainer:
             
             if len(label_counts) < 2:
                 logger.warning(f"Only one class for {antibiotic}. Skipping.")
-                metrics[antibiotic] = {"error": "single_class"}
+                metrics[antibiotic] = {"error": "single_class"}  # type: ignore
                 continue
             
             try:
@@ -354,7 +354,7 @@ class DNABERTTrainer:
                             f"{done}/{n_antibiotics} antibiotics trained; "
                             f"ETA {eta_sec/60:.1f} min"
                         )
-                        progress_callback(progress, msg)
+                        progress_callback(progress, msg)  # type: ignore
                     except InterruptedError:
                         logger.warning(f"Training cancelled after {antibiotic}")
                         break
@@ -372,7 +372,7 @@ class DNABERTTrainer:
                             torch.cuda.empty_cache()
                         except Exception:
                             pass
-                    metrics[antibiotic] = {
+                    metrics[antibiotic] = {  # type: ignore
                         "error": "cuda_oom",
                         "message": err_str,
                     }
@@ -381,7 +381,7 @@ class DNABERTTrainer:
                         f"Error training {antibiotic} after {ab_elapsed/60:.1f} min: {err_str}",
                         exc_info=True,
                     )
-                    metrics[antibiotic] = {"error": err_str}
+                    metrics[antibiotic] = {"error": err_str}  # type: ignore
         
         return metrics
     
@@ -389,10 +389,10 @@ class DNABERTTrainer:
         self,
         data_df: pd.DataFrame,
         antibiotic: str,
-        progress_callback: Optional[callable],
+        progress_callback: Optional[callable],  # type: ignore
         antibiotic_idx: int,
         total_antibiotics: int
-    ) -> Tuple[any, Dict]:
+    ) -> Tuple[any, Dict]:  # type: ignore
         """Train a single DNABERT model for one antibiotic."""
         
         # Optionally subsample genes for this antibiotic to cap training size
@@ -596,7 +596,7 @@ class DNABERTTrainer:
         # Update progress
         if progress_callback:
             progress = int(((antibiotic_idx + 1) / total_antibiotics) * 80) + 10
-            progress_callback(progress, f"Trained DNABERT for {antibiotic}")
+            progress_callback(progress, f"Trained DNABERT for {antibiotic}")  # type: ignore
         
         return model, metrics
     
@@ -611,16 +611,16 @@ class DNABERTTrainer:
             k = self.kmer_size
             if len(seq) >= k:
                 for i in range(len(seq) - k + 1):
-                    kmer = seq[i:i+k]
+                    kmer = seq[i:i+k]  # type: ignore
                     if all(base in 'ACGT' for base in kmer):
                         kmers.append(kmer)
 
             # Limit number of tokens to max_length
-            kmer_seq = ' '.join(kmers[: self.max_length])
+            kmer_seq = ' '.join(kmers[: self.max_length])  # type: ignore
             kmer_sequences.append(kmer_seq)
         
         # Tokenize
-        encodings = self.tokenizer(
+        encodings = self.tokenizer(  # type: ignore
             kmer_sequences,
             padding=True,
             truncation=True,
@@ -671,23 +671,28 @@ class DNABERTTrainer:
         if not self.tokenizer:
             raise ValueError("Models not loaded. Train or load models first.")
 
-        import torch.nn.functional as F
+        import torch.nn.functional as F  # type: ignore
 
+        logger.info("[ensemble-debug] Starting predict_genome_with_proba tokenization...")
         # Tokenize all gene sequences once and reuse across antibiotics
         encodings = self._tokenize_sequences(gene_sequences)
+        logger.info("[ensemble-debug] Tokenization completed successfully")
+        
         input_ids_cpu = encodings['input_ids']
         attention_mask_cpu = encodings['attention_mask']
+
+        logger.info("[ensemble-debug] Input tensors created successfully on CPU")
 
         genome_predictions: Dict[str, int] = {}
         predictions_proba: Dict[str, np.ndarray] = {}
 
         # Level-A gene markers: store per-gene class predictions for each antibiotic
         # so that downstream code can surface which genes were called R/I.
-        self.gene_level_predictions: Dict[str, List[int]] = {}
+        self.gene_level_predictions: Dict[str, List[int]] = {}  # type: ignore
 
         # Per-gene class probabilities (S/I/R) for each antibiotic, used to
         # derive per-gene impact scores downstream.
-        self.gene_level_probabilities: Dict[str, np.ndarray] = {}
+        self.gene_level_probabilities: Dict[str, np.ndarray] = {}  # type: ignore
 
         # Decide whether to use lazy loading (per-antibiotic directories) or
         # in-memory models (legacy/just-trained models).
@@ -711,14 +716,14 @@ class DNABERTTrainer:
 
                 # Persist raw gene-level predictions (0=S,1=I,2=R) for explainability
                 try:
-                    self.gene_level_predictions[antibiotic] = [int(v) for v in gene_predictions.tolist()]
+                    self.gene_level_predictions[antibiotic] = [int(v) for v in gene_predictions.tolist()]  # type: ignore
                 except Exception:
                     # Best-effort only; do not break predictions if conversion fails
                     pass
 
                 # Persist per-gene probabilities for each antibiotic
                 try:
-                    self.gene_level_probabilities[antibiotic] = probs.cpu().numpy()
+                    self.gene_level_probabilities[antibiotic] = probs.cpu().numpy()  # type: ignore
                 except Exception:
                     # Best-effort only
                     pass
@@ -750,8 +755,10 @@ class DNABERTTrainer:
 
         # Use a stable order of antibiotics
         antibiotics = self.antibiotic_names or list(self.antibiotic_model_paths.keys())
+        logger.info(f"[ensemble-debug] Entering lazy loading loop for {len(antibiotics)} antibiotics...")
 
         for antibiotic in antibiotics:
+            logger.info(f"[ensemble-debug] Processing antibiotic: {antibiotic}")
             rel_path = self.antibiotic_model_paths.get(antibiotic)
             if not rel_path:
                 continue
@@ -759,29 +766,37 @@ class DNABERTTrainer:
             ab_dir = os.path.join(base_dir, rel_path)
 
             try:
+                logger.info(f"[ensemble-debug] Loading AutoModel from {ab_dir}")
                 model = AutoModelForSequenceClassification.from_pretrained(ab_dir)
+                logger.info(f"[ensemble-debug] Model loaded, moving to device {run_device}")
                 model.to(run_device)
                 model.eval()
+                logger.info(f"[ensemble-debug] Model moved and eval set for {antibiotic}")
             except Exception as e:
                 logger.error(f"Failed to load DNABERT model for {antibiotic} from {ab_dir}: {e}")
                 continue
 
             with torch.no_grad():
-                input_ids = input_ids_cpu.to(run_device)
-                attention_mask = attention_mask_cpu.to(run_device)
+                logger.info(f"[ensemble-debug] Moving inputs to device for {antibiotic}")
+                input_ids = input_ids_cpu.to(run_device)  # type: ignore
+                attention_mask = attention_mask_cpu.to(run_device)  # type: ignore
                 
+                logger.info(f"[ensemble-debug] Running forward pass for {antibiotic}")
                 outputs = model(input_ids=input_ids, attention_mask=attention_mask)
+                logger.info(f"[ensemble-debug] Forward pass complete")
+                
                 logits = outputs.logits
-                probs = F.softmax(logits, dim=-1)
+                probs = F.softmax(logits, dim=-1)  # type: ignore
                 gene_predictions = torch.argmax(logits, dim=1).cpu().numpy()
+                logger.info(f"[ensemble-debug] Predictions extracted for {antibiotic}")
 
             try:
-                self.gene_level_predictions[antibiotic] = [int(v) for v in gene_predictions.tolist()]
+                self.gene_level_predictions[antibiotic] = [int(v) for v in gene_predictions.tolist()]  # type: ignore
             except Exception:
                 pass
 
             try:
-                self.gene_level_probabilities[antibiotic] = probs.cpu().numpy()
+                self.gene_level_probabilities[antibiotic] = probs.cpu().numpy()  # type: ignore
             except Exception:
                 pass
 
@@ -825,7 +840,7 @@ class DNABERTTrainer:
 
         if self.tokenizer is not None:
             try:
-                self.tokenizer.save_pretrained(tokenizer_dir)
+                self.tokenizer.save_pretrained(tokenizer_dir)  # type: ignore
             except Exception as e:
                 logger.warning(f"Failed to save DNABERT tokenizer to {tokenizer_dir}: {e}")
 

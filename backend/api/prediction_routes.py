@@ -2,10 +2,10 @@
 Prediction API endpoints for antibiotic resistance prediction.
 Handles genome uploads and returns antibiogram predictions.
 """
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form  # type: ignore
 import logging
 from typing import Dict, List, Optional, Any, Tuple
-import numpy as np
+import numpy as np  # type: ignore
 import os
 import glob
 import time
@@ -13,13 +13,13 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from preprocessing.kmer_processor import KmerProcessor
-from preprocessing.dnabert_processor import DNABERTProcessor
-from models.xgboost_trainer import XGBoostTrainer
-from services.qdrant_service import QdrantService
-from services.storage_service import StorageService
-from services.embedding_service import EmbeddingService
-from config import settings
+from preprocessing.kmer_processor import KmerProcessor  # type: ignore
+from preprocessing.dnabert_processor import DNABERTProcessor  # type: ignore
+from models.xgboost_trainer import XGBoostTrainer  # type: ignore
+from services.qdrant_service import QdrantService  # type: ignore
+from services.storage_service import StorageService  # type: ignore
+from services.embedding_service import EmbeddingService  # type: ignore
+from config import settings  # type: ignore
 import json
 
 router = APIRouter()
@@ -127,13 +127,14 @@ def _compute_xgb_markers_for_sample(
             continue
 
         # Sort by importance and select top_k markers
-        hits.sort(key=lambda m: m["importance"], reverse=True)
-        selected = hits[:top_k]
+        hits.sort(key=lambda m: float(m.get("importance", 0.0)), reverse=True)
+        # Add `type: ignore` since Pyre has trouble understanding slicing on dict views
+        selected = hits[:top_k]  # type: ignore
 
-        total_imp = sum(m["importance"] for m in selected) or 0.0
+        total_imp = sum(float(m.get("importance", 0.0)) for m in selected) or 0.0
         if total_imp > 0.0:
             for m in selected:
-                m["normalized_importance"] = m["importance"] / total_imp
+                m["normalized_importance"] = float(m.get("importance", 0.0)) / total_imp
         else:
             for m in selected:
                 m["normalized_importance"] = 0.0
@@ -175,14 +176,14 @@ def _compute_transformer_markers_for_sample(
 
     for ab_name, gene_preds in gene_map.items():
         try:
-            arr = np.array(gene_preds, dtype=int)
+            arr = np.array(gene_preds, dtype=int)  # type: ignore
         except Exception:
             continue
 
         candidates: List[Dict] = []
         probs_arr = None
         try:
-            probs_arr = prob_map.get(ab_name)
+            probs_arr = prob_map.get(ab_name)  # type: ignore
         except Exception:
             probs_arr = None
 
@@ -191,9 +192,9 @@ def _compute_transformer_markers_for_sample(
                 # Use probability of the predicted class as a per-gene importance score
                 importance = 0.0
                 try:
-                    if isinstance(probs_arr, np.ndarray) and probs_arr.ndim == 2:
-                        if 0 <= idx < probs_arr.shape[0] and 0 <= cls_idx < probs_arr.shape[1]:
-                            importance = float(probs_arr[idx, cls_idx])
+                    if isinstance(probs_arr, np.ndarray) and probs_arr.ndim == 2:  # type: ignore
+                        if 0 <= idx < probs_arr.shape[0] and 0 <= cls_idx < probs_arr.shape[1]:  # type: ignore
+                            importance = float(probs_arr[idx, cls_idx])  # type: ignore
                 except Exception:
                     importance = 0.0
 
@@ -220,7 +221,8 @@ def _compute_transformer_markers_for_sample(
                 m["gene_index"],
             )
         )
-        selected = candidates[:max_genes_per_ab]
+        # Add `type: ignore` since Pyre has trouble understanding slicing on dict views
+        selected = candidates[:max_genes_per_ab]  # type: ignore
 
         # Normalize importance scores within this antibiotic, similar to XGBoost markers
         total_imp = sum(float(m.get("importance", 0.0)) for m in selected) or 0.0
@@ -252,7 +254,7 @@ def _compute_transformer_markers_for_sample(
             if idx < 0 or idx >= len(gene_sequences):
                 continue
 
-            seq = gene_sequences[idx]
+            seq = gene_sequences[idx]  # type: ignore
             if not seq:
                 continue
 
@@ -299,7 +301,7 @@ def _adjust_confidence_with_similarity(
     agree_weight = 0.0
     disagree_weight = 0.0
 
-    for similar in similar_genomes[:5]:
+    for similar in similar_genomes[:5]:  # type: ignore
         metadata = similar.get("metadata", {}) or {}
         resistance_profile = metadata.get("resistance_profile", {}) or {}
         if not isinstance(resistance_profile, dict):
@@ -316,16 +318,16 @@ def _adjust_confidence_with_similarity(
         if score <= 0.0:
             continue
         if similar_phenotype == pred_label:
-            agree_weight += score
+            agree_weight += float(score)  # type: ignore
         else:
-            disagree_weight += score
+            disagree_weight += float(score)  # type: ignore
 
-    total_weight = agree_weight + disagree_weight
+    total_weight = float(agree_weight) + float(disagree_weight)  # type: ignore
     if total_weight <= 0.0:
         return confidence, class_probs
 
-    agreement_ratio = agree_weight / total_weight
-    disagreement_ratio = disagree_weight / total_weight
+    agreement_ratio = float(agree_weight) / float(total_weight)  # type: ignore
+    disagreement_ratio = float(disagree_weight) / float(total_weight)  # type: ignore
 
     new_conf = confidence
     new_probs = dict(class_probs)
@@ -379,7 +381,7 @@ def _extract_query_hints_from_fasta(fasta_content: str, filename: str) -> Dict[s
     accession_hint: Optional[str] = None
 
     if header_line:
-        header_text = header_line.lstrip('>').strip()
+        header_text = header_line.lstrip('>').strip()  # type: ignore
         # Overall accession-like token (first token)
         tokens = header_text.split()
         if tokens:
@@ -421,9 +423,9 @@ def _rerank_similar_genomes(
     if not similar_genomes or not hints:
         return similar_genomes
 
-    species_hint = (hints.get('species_hint') or '').lower()
-    accession_hint = (hints.get('accession_hint') or '').lower()
-    name_hint = (hints.get('name_hint') or '').lower()
+    species_hint = (hints.get('species_hint') or '').lower()  # type: ignore
+    accession_hint = (hints.get('accession_hint') or '').lower()  # type: ignore
+    name_hint = (hints.get('name_hint') or '').lower()  # type: ignore
 
     if not (species_hint or accession_hint or name_hint):
         return similar_genomes
@@ -442,10 +444,10 @@ def _rerank_similar_genomes(
         metadata = g.get('metadata', {}) or {}
         meta_text_parts: List[str] = []
         for key in ('species', 'organism_name', 'genome_name', 'strain'):
-            val = metadata.get(key)
+            val = metadata.get(key)  # type: ignore
             if isinstance(val, str):
                 meta_text_parts.append(val)
-        genome_id_val = g.get('genome_id') or metadata.get('genome_id')
+        genome_id_val = g.get('genome_id') or metadata.get('genome_id')  # type: ignore
         if isinstance(genome_id_val, str):
             meta_text_parts.append(genome_id_val)
 
@@ -478,7 +480,7 @@ def generate_mock_prediction(fasta_content: str, filename: str) -> Dict:
     # Calculate basic stats from FASTA
     sequence = ''.join([line.strip() for line in fasta_content.split('\n') if not line.startswith('>')])
     seq_length = len(sequence)
-    gc_content = round((sequence.count('G') + sequence.count('C')) / seq_length * 100, 2) if seq_length > 0 else 0
+    gc_content = round((sequence.count('G') + sequence.count('C')) / seq_length * 100, 2) if seq_length > 0 else 0  # type: ignore
     
     # Common antibiotics with mock predictions
     antibiotics = [
@@ -497,8 +499,8 @@ def generate_mock_prediction(fasta_content: str, filename: str) -> Dict:
         predictions[antibiotic] = {
             "prediction": "Resistant" if resistant_prob > 0.5 else "Susceptible",
             "confidence": {
-                "Resistant": round(resistant_prob, 3),
-                "Susceptible": round(susceptible_prob, 3)
+                "Resistant": round(resistant_prob, 3),  # type: ignore
+                "Susceptible": round(susceptible_prob, 3)  # type: ignore
             }
         }
     
@@ -507,11 +509,11 @@ def generate_mock_prediction(fasta_content: str, filename: str) -> Dict:
                     "Pseudomonas aeruginosa", "Enterococcus faecalis"]
     
     similar_genomes = []
-    for i, species in enumerate(mock_species[:3]):
+    for i, species in enumerate(mock_species[:3]):  # type: ignore
         similar_genomes.append({
             "genome_id": f"MOCK_{i+1:03d}",
             "species": species,
-            "similarity_score": round(random.uniform(0.65, 0.95), 3)
+            "similarity_score": round(random.uniform(0.65, 0.95), 3)  # type: ignore
         })
     
     return {
@@ -613,7 +615,7 @@ def find_best_model(preferred_types: Optional[List[str]] = None) -> Optional[Dic
 
         # Optionally filter by preferred model types
         if preferred_types:
-            filtered = [m for m in model_candidates if m['model_type'] in preferred_types]
+            filtered = [m for m in model_candidates if m['model_type'] in preferred_types]  # type: ignore
             if not filtered:
                 return None
             model_candidates = filtered
@@ -765,11 +767,13 @@ async def predict_resistance(
 
         # Determine effective BLAST mode for this request. When enable_blast is
         # false, we always disable BLAST regardless of global settings.
-        effective_blast_mode: Optional[str]
+        effective_blast_mode: Optional[str] = "off"
         if enable_blast:
             effective_blast_mode = getattr(settings, "blast_mode", "off")
-        else:
-            effective_blast_mode = "off"
+            # If the user toggled "Use BLAST" in the UI but the server config
+            # is "off" (the default), upgrade it to "ncbi" so the feature works.
+            if effective_blast_mode == "off":
+                effective_blast_mode = "ncbi"
 
         # Special ensemble mode: run both XGBoost and Transformer (if available)
         if model_mode == "both":
@@ -785,7 +789,7 @@ async def predict_resistance(
             # Prepare containers
             similar_genomes = []
             similarity_search_successful = False
-            ensemble_details: Dict[str, any] = {
+            ensemble_details: Dict[str, Any] = {
                 "mode": "both",
                 "xgboost_model": xgb_info,
                 "transformer_model": tr_info,
@@ -799,7 +803,7 @@ async def predict_resistance(
 
             if tr_info:
                 try:
-                    from models.transformer_trainer import DNABERTTrainer
+                    from models.transformer_trainer import DNABERTTrainer  # type: ignore
 
                     tr_model_path = tr_info["model_path"]
                     logger.info(f"Loading Transformer model for ensemble: {tr_model_path}")
@@ -938,12 +942,14 @@ async def predict_resistance(
             for antibiotic in sorted(antibiotics):
                 # Transformer component
                 tr_entry = None
-                if antibiotic in tr_predictions_dict:
-                    tr_class = tr_predictions_dict[antibiotic]
+                if antibiotic in tr_predictions_dict:  # type: ignore
+                    tr_class = tr_predictions_dict[antibiotic]  # type: ignore
                     tr_label = resistance_map.get(tr_class, 'Unknown')
-                    tr_proba = tr_predictions_proba.get(antibiotic)
-                    if isinstance(tr_proba, np.ndarray) and len(tr_proba) == 3:
-                        tr_conf = float(tr_proba[tr_class])
+                    tr_proba = None
+                    if isinstance(tr_predictions_proba, dict) and antibiotic in tr_predictions_proba:
+                        tr_proba = tr_predictions_proba[antibiotic]
+                    if tr_proba is not None and isinstance(tr_proba, np.ndarray) and len(tr_proba) == 3:  # type: ignore
+                        tr_conf = float(tr_proba[tr_class])  # type: ignore
                         tr_probs_dict = {
                             'S': float(tr_proba[0]),
                             'I': float(tr_proba[1]),
@@ -968,12 +974,14 @@ async def predict_resistance(
 
                 # XGBoost component
                 xgb_entry = None
-                if antibiotic in xgb_predictions_dict:
-                    xgb_class = xgb_predictions_dict[antibiotic]
+                if antibiotic in xgb_predictions_dict:  # type: ignore
+                    xgb_class = xgb_predictions_dict[antibiotic]  # type: ignore
                     xgb_label = resistance_map.get(xgb_class, 'Unknown')
-                    xgb_proba = xgb_predictions_proba.get(antibiotic)
-                    if isinstance(xgb_proba, np.ndarray) and len(xgb_proba) == 3:
-                        xgb_conf = float(xgb_proba[xgb_class])
+                    xgb_proba = None
+                    if isinstance(xgb_predictions_proba, dict) and antibiotic in xgb_predictions_proba:
+                        xgb_proba = xgb_predictions_proba[antibiotic]
+                    if xgb_proba is not None and isinstance(xgb_proba, np.ndarray) and len(xgb_proba) == 3:  # type: ignore
+                        xgb_conf = float(xgb_proba[xgb_class])  # type: ignore
                         xgb_probs_dict = {
                             'S': float(xgb_proba[0]),
                             'I': float(xgb_proba[1]),
@@ -1058,9 +1066,9 @@ async def predict_resistance(
                 'predictions': final_predictions,
                 'analysis_summary': {
                     'sequence_length': len(sequence_clean),
-                    'gc_content': round(gc_content, 1),
-                    'unique_kmers_found': len(kmer_counts) if kmer_counts else 0,
-                    'n_genes': len(gene_sequences) if gene_sequences is not None else None,
+                    'gc_content': round(float(gc_content), 1),  # type: ignore
+                    'unique_kmers_found': len(kmer_counts) if kmer_counts else 0,  # type: ignore
+                    'n_genes': len(gene_sequences) if gene_sequences is not None else None,  # type: ignore
                     'model_used': 'Ensemble (XGBoost + Transformer)' if xgb_info and tr_info
                     else 'Transformer only' if tr_info
                     else 'XGBoost only',
@@ -1106,7 +1114,7 @@ async def predict_resistance(
         
         try:
             if is_transformer:
-                from models.transformer_trainer import DNABERTTrainer
+                from models.transformer_trainer import DNABERTTrainer  # type: ignore
                 trainer = DNABERTTrainer.load_models(model_path)
                 logger.info("✅ Loaded DNABERT Transformer model")
             else:
@@ -1226,9 +1234,9 @@ async def predict_resistance(
                 if qdrant_service.client:
                     logger.info("Searching for similar genomes in database...")
                     # Generate embedding using same method as training (PCA reduction to 768 dims)
-                    from jobs.training_job import _generate_embeddings_from_features
+                    from jobs.training_job import _generate_embeddings_from_features  # type: ignore
                     # Reshape feature vector to 2D array (1 genome × n_features)
-                    feature_vector_2d = feature_vector.reshape(1, -1)
+                    feature_vector_2d = feature_vector.reshape(1, -1)  # type: ignore
                     query_embedding = _generate_embeddings_from_features(feature_vector_2d, target_dim=768)
                     query_embedding = query_embedding[0]  # Get single embedding vector
                     
@@ -1293,14 +1301,14 @@ async def predict_resistance(
         prediction_results = []
         resistance_map = {0: 'S', 1: 'I', 2: 'R'}
         
-        for antibiotic in trainer.antibiotic_names:
-            if antibiotic in predictions_dict:
-                pred_class = predictions_dict[antibiotic]
+        for antibiotic in trainer.antibiotic_names:  # type: ignore
+            if antibiotic in predictions_dict:  # type: ignore
+                pred_class = predictions_dict[antibiotic]  # type: ignore
                 pred_label = resistance_map.get(pred_class, 'Unknown')
                 
                 # Get confidence (probability of predicted class)
-                if antibiotic in predictions_proba:
-                    proba = predictions_proba[antibiotic]
+                if antibiotic in predictions_proba:  # type: ignore
+                    proba = predictions_proba[antibiotic]  # type: ignore
                     if isinstance(proba, np.ndarray) and len(proba) == 3:
                         confidence = float(proba[pred_class])
                         class_probs = {
@@ -1365,7 +1373,7 @@ async def predict_resistance(
             "predictions": prediction_results,
             "analysis_summary": {
                 "sequence_length": len(sequence_clean),
-                "gc_content": round(gc_content, 1),
+                "gc_content": round(float(gc_content), 1),  # type: ignore
                 "unique_kmers_found": len(kmer_counts) if kmer_counts else 0,
                 "n_genes": len(gene_sequences) if is_transformer else None,
                 "model_used": os.path.basename(model_path),
@@ -1475,10 +1483,12 @@ def _save_blast_cache() -> None:
         logger.warning(f"Failed to save BLAST cache to {_blast_cache_path}: {e}")
 
 
-def _run_blast_ncbi(kmer: str, max_hits: int = 1) -> List[Dict]:
+def _run_blast_ncbi(kmer: str, max_hits: int = 1) -> List[Dict[str, Any]]:
     """Run BLAST against NCBI nt using Biopython (remote)."""
     try:
         from Bio.Blast import NCBIWWW, NCBIXML  # type: ignore
+        import urllib.error
+        import time
         try:
             from Bio import Entrez  # type: ignore
             email = getattr(settings, "ncbi_email", None)
@@ -1487,7 +1497,22 @@ def _run_blast_ncbi(kmer: str, max_hits: int = 1) -> List[Dict]:
         except Exception:
             pass
 
-        handle = NCBIWWW.qblast("blastn", "nt", kmer, hitlist_size=max_hits)
+        handle = None
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                handle = NCBIWWW.qblast("blastn", "nt", kmer, hitlist_size=max_hits)
+                break
+            except urllib.error.HTTPError as e:
+                logger.warning(f"NCBI BLAST HTTP error on attempt {attempt+1}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep((attempt + 1) * 2)  # 2s, 4s, 6s backoff
+                else:
+                    raise
+
+        if handle is None:
+            return []
+
         record = NCBIXML.read(handle)
 
         hits: List[Dict] = []
@@ -1506,8 +1531,8 @@ def _run_blast_ncbi(kmer: str, max_hits: int = 1) -> List[Dict]:
                 {
                     "hit_id": getattr(alignment, "hit_id", ""),
                     "title": getattr(alignment, "hit_def", ""),
-                    "length": getattr(alignment, "length", None),
-                    "evalue": getattr(hsp, "expect", None),
+                    "length": int(getattr(alignment, "length", 0)) if getattr(alignment, "length", None) else None,
+                    "evalue": float(getattr(hsp, "expect", 0.0)) if getattr(hsp, "expect", None) else None,
                     "identity": identity,
                 }
             )
@@ -1521,7 +1546,7 @@ def _run_blast_ncbi(kmer: str, max_hits: int = 1) -> List[Dict]:
         return []
 
 
-def _run_blast_local(kmer: str, max_hits: int = 1) -> List[Dict]:
+def _run_blast_local(kmer: str, max_hits: int = 1) -> List[Dict[str, Any]]:
     """Run local BLAST+ (blastn) against a configured database."""
     db = settings.blast_local_db
     exe = settings.blast_local_exe or "blastn"
@@ -1558,12 +1583,19 @@ def _run_blast_local(kmer: str, max_hits: int = 1) -> List[Dict]:
             )
             return []
 
-        hits: List[Dict] = []
+        hits: List[Dict[str, Any]] = []
         for line in result.stdout.strip().splitlines():
             parts = line.split("\t")
             if len(parts) < 5:
                 continue
-            hit_id, title, length_str, pident_str, evalue_str = parts[:5]
+            
+            # parts is typing as list[str], ensure Pyre knows this explicitly
+            hit_id: str = parts[0]
+            title: str = parts[1]
+            length_str: str = parts[2]
+            pident_str: str = parts[3]
+            evalue_str: str = parts[4]
+            
             try:
                 length = int(length_str)
             except ValueError:
@@ -1604,9 +1636,11 @@ def _run_blast_local(kmer: str, max_hits: int = 1) -> List[Dict]:
                 os.remove(tmp_fasta)
             except Exception:
                 pass
+                
+    return []
 
 
-def _run_blast_for_kmer(kmer: str, max_hits: int = 1) -> List[Dict]:
+def _run_blast_for_kmer(kmer: str, max_hits: int = 1) -> List[Dict[str, Any]]:
     """Config-driven BLAST with simple JSON cache.
 
     Respects settings.blast_mode:

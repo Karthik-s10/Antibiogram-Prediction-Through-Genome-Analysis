@@ -2,16 +2,16 @@
 API endpoints for model explainability using SHAP.
 Provides endpoints for generating and retrieving model explanations.
 """
-from fastapi import APIRouter, HTTPException, BackgroundTasks
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, BackgroundTasks  # type: ignore
+from pydantic import BaseModel, Field  # type: ignore
 from typing import List, Dict, Any, Optional
 import logging
 import asyncio
 from datetime import datetime
 
-from ..explainability import SHAPUtils, XGBoostExplainer, TransformerExplainer
-from ..models.xgboost_trainer import XGBoostTrainer
-from ..models.transformer_trainer import TransformerTrainer
+from explainability import SHAPUtils, XGBoostExplainer, TransformerExplainer  # type: ignore
+from models.xgboost_trainer import XGBoostTrainer  # type: ignore
+from models.transformer_trainer import DNABERTTrainer  # type: ignore
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/explanations", tags=["explanations"])
@@ -89,11 +89,23 @@ async def explain_single_sample(request: ExplanationRequest):
     try:
         # Validate request
         if request.model_type.lower() == "xgboost":
-            if request.features is None:
-                raise HTTPException(status_code=400, detail="Features required for XGBoost models")
-            
             if xgboost_explainer is None:
                 raise HTTPException(status_code=500, detail="XGBoost explainer not initialized")
+
+            if request.features is None and request.sequence is not None:
+                from preprocessing.kmer_processor import KmerProcessor  # type: ignore
+                from config import settings  # type: ignore
+                k_size = getattr(settings, 'kmer_size_xgboost', 10)
+                processor = KmerProcessor(k=k_size)
+                fasta_content = f">SEQ\\n{request.sequence}"
+                kmer_counts = processor.extract_kmers_from_fasta(fasta_content)
+                
+                feature_names = xgboost_explainer.get_feature_names(request.antibiotic)
+                if feature_names:
+                    request.features = [float(kmer_counts.get(feat, 0)) for feat in feature_names]
+
+            if request.features is None:
+                raise HTTPException(status_code=400, detail="Features required for XGBoost models")
             
             # Generate explanation
             explanation = xgboost_explainer.explain_single_sample(
@@ -126,10 +138,10 @@ async def explain_single_sample(request: ExplanationRequest):
         
         processing_time = (datetime.now() - start_time).total_seconds()
         
-        return ExplanationResponse(
+        return ExplanationResponse(  # type: ignore
             success=True,
-            explanation=formatted_explanation,
-            processing_time=processing_time
+            explanation=formatted_explanation,  # type: ignore
+            processing_time=processing_time  # type: ignore
         )
         
     except HTTPException:
@@ -138,10 +150,10 @@ async def explain_single_sample(request: ExplanationRequest):
         logger.error(f"Error in single sample explanation: {str(e)}")
         processing_time = (datetime.now() - start_time).total_seconds()
         
-        return ExplanationResponse(
+        return ExplanationResponse(  # type: ignore
             success=False,
-            error=str(e),
-            processing_time=processing_time
+            error=str(e),  # type: ignore
+            processing_time=processing_time  # type: ignore
         )
 
 @router.post("/batch", response_model=BatchExplanationResponse)
@@ -195,10 +207,10 @@ async def explain_batch_samples(request: BatchExplanationRequest):
         
         processing_time = (datetime.now() - start_time).total_seconds()
         
-        return BatchExplanationResponse(
+        return BatchExplanationResponse(  # type: ignore
             success=True,
-            explanations=formatted_explanations,
-            processing_time=processing_time
+            explanations=formatted_explanations,  # type: ignore
+            processing_time=processing_time  # type: ignore
         )
         
     except HTTPException:
@@ -207,10 +219,10 @@ async def explain_batch_samples(request: BatchExplanationRequest):
         logger.error(f"Error in batch explanation: {str(e)}")
         processing_time = (datetime.now() - start_time).total_seconds()
         
-        return BatchExplanationResponse(
+        return BatchExplanationResponse(  # type: ignore
             success=False,
-            error=str(e),
-            processing_time=processing_time
+            error=str(e),  # type: ignore
+            processing_time=processing_time  # type: ignore
         )
 
 @router.post("/global-importance", response_model=ExplanationResponse)
@@ -273,10 +285,10 @@ async def get_global_feature_importance(request: GlobalImportanceRequest):
         
         processing_time = (datetime.now() - start_time).total_seconds()
         
-        return ExplanationResponse(
+        return ExplanationResponse(  # type: ignore
             success=True,
-            explanation=explanation_data,
-            processing_time=processing_time
+            explanation=explanation_data,  # type: ignore
+            processing_time=processing_time  # type: ignore
         )
         
     except HTTPException:
@@ -285,10 +297,10 @@ async def get_global_feature_importance(request: GlobalImportanceRequest):
         logger.error(f"Error getting global importance: {str(e)}")
         processing_time = (datetime.now() - start_time).total_seconds()
         
-        return ExplanationResponse(
+        return ExplanationResponse(  # type: ignore
             success=False,
-            error=str(e),
-            processing_time=processing_time
+            error=str(e),  # type: ignore
+            processing_time=processing_time  # type: ignore
         )
 
 @router.post("/summary", response_model=ExplanationResponse)
@@ -320,10 +332,10 @@ async def get_explanation_summary(request: SummaryRequest):
         
         processing_time = (datetime.now() - start_time).total_seconds()
         
-        return ExplanationResponse(
+        return ExplanationResponse(  # type: ignore
             success=True,
-            explanation=summary,
-            processing_time=processing_time
+            explanation=summary,  # type: ignore
+            processing_time=processing_time  # type: ignore
         )
         
     except HTTPException:
@@ -332,10 +344,10 @@ async def get_explanation_summary(request: SummaryRequest):
         logger.error(f"Error getting explanation summary: {str(e)}")
         processing_time = (datetime.now() - start_time).total_seconds()
         
-        return ExplanationResponse(
+        return ExplanationResponse(  # type: ignore
             success=False,
-            error=str(e),
-            processing_time=processing_time
+            error=str(e),  # type: ignore
+            processing_time=processing_time  # type: ignore
         )
 
 @router.get("/models")

@@ -2,15 +2,16 @@
 XGBoost SHAP explainer for multi-antibiotic models.
 Handles dictionary model structure from your training job f0849bdd.
 """
-import xgboost as xgb
-import numpy as np
-import pandas as pd
+import xgboost as xgb  # type: ignore
+import numpy as np  # type: ignore
+import pandas as pd  # type: ignore
 from typing import Dict, List, Tuple, Optional, Any, Union
 import pickle
+import json
 import logging
 from pathlib import Path
 
-from .shap_utils import SHAPUtils, SHAPExplanation
+from .shap_utils import SHAPUtils, SHAPExplanation  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,7 @@ class XGBoostExplainer:
     
     def __init__(
         self,
-        models_dir: str = "trained_models/xgboost",
+        models_dir: str = "trained_models",
         model_file: str = "xgboost_f0849bdd.pkl",
         features_file: str = "xgboost_f0849bdd_features.json",
         metadata_file: str = "xgboost_f0849bdd_metadata.json"
@@ -111,7 +112,7 @@ class XGBoostExplainer:
             return None
         
         try:
-            import shap
+            import shap  # type: ignore
             explainer = shap.TreeExplainer(model, model_output="probability")
             self.explainers[antibiotic] = explainer
             logger.info(f"Created SHAP explainer for {antibiotic}")
@@ -136,8 +137,8 @@ class XGBoostExplainer:
             # Find index of antibiotic
             antibiotic_idx = antibiotic_names.index(antibiotic)
             feature_names_data = self.load_feature_names()
-            if 'feature_names' in feature_names_data:
-                antibiotic_features = feature_names_data['feature_names']
+            if 'feature_names' in feature_names_data:  # type: ignore
+                antibiotic_features = feature_names_data['feature_names']  # type: ignore
                 if antibiotic_idx < len(antibiotic_features):
                     return antibiotic_features[antibiotic_idx]
         

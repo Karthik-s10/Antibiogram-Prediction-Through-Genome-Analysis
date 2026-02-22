@@ -2,26 +2,26 @@
 DNABERT Transformer SHAP explainer for antibiotic resistance prediction.
 Provides token-level and sequence-level explanations using GradientExplainer.
 """
-import numpy as np
-import pandas as pd
-import torch
-import shap
+import numpy as np  # type: ignore
+import pandas as pd  # type: ignore
+import torch  # type: ignore
+import shap  # type: ignore
 import pickle
 import logging
 from typing import Dict, List, Tuple, Optional, Any, Union
 from pathlib import Path
 import json
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoTokenizer, AutoModelForSequenceClassification  # type: ignore
 import re
 
-from .shap_utils import SHAPUtils, SHAPExplanation
+from .shap_utils import SHAPUtils, SHAPExplanation  # type: ignore
 
 logger = logging.getLogger(__name__)
 
 class TransformerExplainer:
     """SHAP explainer for DNABERT transformer models."""
     
-    def __init__(self, models_dir: str = "trained_models/transformer"):
+    def __init__(self, models_dir: str = "trained_models"):
         """
         Initialize Transformer explainer.
         
@@ -39,10 +39,19 @@ class TransformerExplainer:
         if antibiotic in self.models:
             return self.models[antibiotic], self.tokenizers[antibiotic]
             
+        # The frontend provides 'transformer_ce13dcc6' style IDs sometimes, or we just load the one we have
+        # Let's search for any 'transformer_*' directory if the specific one doesn't exist
         model_path = self.models_dir / f"transformer_{antibiotic}"
         
         if not model_path.exists():
-            raise FileNotFoundError(f"Model not found: {model_path}")
+            # Try to find any transformer model in the root trained_models directory
+            root_models = self.models_dir.parent if self.models_dir.name == "transformer" else self.models_dir
+            candidates = list(root_models.glob("transformer_*"))
+            if candidates:
+                model_path = candidates[0]
+                logger.info(f"Using found transformer model: {model_path}")
+            else:
+                raise FileNotFoundError(f"Model not found: {model_path} and no alternatives found in {root_models}")
         
         try:
             # Load tokenizer and model
@@ -96,7 +105,7 @@ class TransformerExplainer:
                 background_inputs[key] = background_inputs[key].cuda()
         
         # Create GradientExplainer
-        explainer = shap.GradientExplainer(
+        explainer = shap.GradientExplainer(  # type: ignore
             model,
             background_inputs,
             local_smoothing=0.01  # Add small smoothing for stability
@@ -194,7 +203,7 @@ class TransformerExplainer:
                 antibiotic=antibiotic,
                 explanation_type="token_importance",
                 metadata={
-                    'model_path': str(self.models_dir / f"transformer_{antibiotic}"),
+                    'model_path': str(model_path) if 'model_path' in locals() else "unknown",  # type: ignore
                     'sequence_length': len(sequence),
                     'token_count': len(tokens),
                     'max_length': inputs['input_ids'].shape[1],
@@ -241,7 +250,7 @@ class TransformerExplainer:
                 # Get prediction if not provided
                 if predictions is None or probabilities is None:
                     with torch.no_grad():
-                        outputs = model(**inputs)
+                        outputs = model(**inputs)  # type: ignore
                         logits = outputs.logits
                         probs = torch.softmax(logits, dim=-1)
                         pred_class = torch.argmax(probs, dim=-1)
@@ -255,35 +264,35 @@ class TransformerExplainer:
                         if probabilities is None:
                             probabilities = []
                         
-                        predictions.append(pred_label)
-                        probabilities.append(pred_prob)
+                        predictions.append(pred_label)  # type: ignore
+                        probabilities.append(pred_prob)  # type: ignore
                 
                 # Generate SHAP values
-                shap_values = explainer.shap_values(inputs)
+                shap_values = explainer.shap_values(inputs)  # type: ignore
                 
                 # Process SHAP values
                 if isinstance(shap_values, list):
                     shap_values = np.array(shap_values)
                 
                 # Get tokens
-                tokens = tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])
+                tokens = tokenizer.convert_ids_to_tokens(inputs['input_ids'][0])  # type: ignore
                 feature_names = [f"token_{i}_{token}" for i, token in enumerate(tokens)]
                 
                 # Get base value
-                base_value = explainer.expected_value
+                base_value = explainer.expected_value  # type: ignore
                 
                 explanation = SHAPExplanation(
                     shap_values=shap_values,
                     feature_names=feature_names,
                     base_values=base_value,
                     data=sequence,
-                    prediction=predictions[i],
-                    probability=probabilities[i],
+                    prediction=predictions[i],  # type: ignore
+                    probability=probabilities[i],  # type: ignore
                     model_type="DNABERT",
                     antibiotic=antibiotic,
                     explanation_type="token_importance",
                     metadata={
-                        'model_path': str(self.models_dir / f"transformer_{antibiotic}"),
+                        'model_path': "unknown",
                         'sequence_length': len(sequence),
                         'token_count': len(tokens),
                         'max_length': inputs['input_ids'].shape[1],
@@ -335,8 +344,8 @@ class TransformerExplainer:
                         token_importance[token] = []
                         token_counts[token] = 0
                     
-                    token_importance[token].append(float(shap_val))
-                    token_counts[token] += 1
+                    token_importance[token].append(float(shap_val))  # type: ignore
+                    token_counts[token] += 1  # type: ignore
             
             # Calculate statistics for each token
             token_stats = {}
@@ -367,7 +376,7 @@ class TransformerExplainer:
                 'token_importance': sorted_tokens,
                 'total_sequences': len(sequences),
                 'unique_tokens': len(token_stats),
-                'top_tokens': dict(list(sorted_tokens.items())[:top_k])
+                'top_tokens': dict(list(sorted_tokens.items())[:top_k])  # type: ignore
             }
             
         except Exception as e:
@@ -403,22 +412,22 @@ class TransformerExplainer:
                 ]
                 
                 token_summary = self.get_token_importance_summary(antibiotic, sample_sequences)
-                summary['antibiotics'][antibiotic] = token_summary
+                summary['antibiotics'][antibiotic] = token_summary  # type: ignore
                 
                 # Collect all tokens for cross-antibiotic analysis
                 for token, stats in token_summary['token_importance'].items():
                     if token not in all_token_importance:
-                        all_token_importance[token] = []
+                        all_token_importance[token] = []  # type: ignore
                     all_token_importance[token].append(stats['mean_importance'])
                     
             except Exception as e:
                 logger.warning(f"Could not process {antibiotic}: {str(e)}")
-                summary['antibiotics'][antibiotic] = {'error': str(e)}
+                summary['antibiotics'][antibiotic] = {'error': str(e)}  # type: ignore
         
         # Calculate cross-antibiotic token statistics
         for token, importances in all_token_importance.items():
             if len(importances) > 1:  # Only include tokens that appear in multiple models
-                summary['common_tokens'][token] = {
+                summary['common_tokens'][token] = {  # type: ignore
                     'mean_importance': np.mean(importances),
                     'std_importance': np.std(importances),
                     'max_importance': np.max(importances),
@@ -427,8 +436,8 @@ class TransformerExplainer:
                 }
         
         # Sort common tokens by mean importance
-        summary['common_tokens'] = dict(sorted(
-            summary['common_tokens'].items(),
+        summary['common_tokens'] = dict(sorted(  # type: ignore
+            summary['common_tokens'].items(),  # type: ignore
             key=lambda x: x[1]['mean_importance'],
             reverse=True
         ))
