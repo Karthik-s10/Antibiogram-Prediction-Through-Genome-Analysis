@@ -201,8 +201,8 @@ const TrainingHistory: React.FC<TrainingHistoryProps> = ({ onSelectJob }) => {
     <div className="w-full max-w-5xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <History className="h-5 w-5 text-slate-700" />
-          <h2 className="text-lg font-semibold text-slate-800">Training History</h2>
+          <History className="h-5 w-5 text-slate-300" />
+          <h2 className="text-lg font-semibold text-slate-100">Training History</h2>
         </div>
         <div className="flex items-center gap-2">
           <Button
@@ -492,9 +492,8 @@ const TrainingHistory: React.FC<TrainingHistoryProps> = ({ onSelectJob }) => {
           return (
             <Card
               key={jobId}
-              className={`border transition-colors cursor-pointer hover:border-blue-500 ${
-                selectedJob?.jobId === jobId ? "ring-2 ring-blue-400" : ""
-              }`}
+              className={`border transition-colors cursor-pointer hover:border-blue-500 ${selectedJob?.jobId === jobId ? "ring-2 ring-blue-400" : ""
+                }`}
               onClick={() => handleSelectJob(jobId, jobType)}
             >
               <CardHeader className="py-3 flex flex-row items-center justify-between gap-2">
@@ -638,20 +637,18 @@ const TrainingHistory: React.FC<TrainingHistoryProps> = ({ onSelectJob }) => {
                 label: "Genomes / Genes",
                 a:
                   metricsA.n_genomes !== undefined
-                    ? `${metricsA.n_genomes} genomes${
-                        metricsA.n_features !== undefined ? `, ${metricsA.n_features} features` : ""
-                      }`
+                    ? `${metricsA.n_genomes} genomes${metricsA.n_features !== undefined ? `, ${metricsA.n_features} features` : ""
+                    }`
                     : metricsA.n_genes !== undefined
-                    ? `${metricsA.n_genes} genes`
-                    : "N/A",
+                      ? `${metricsA.n_genes} genes`
+                      : "N/A",
                 b:
                   metricsB.n_genomes !== undefined
-                    ? `${metricsB.n_genomes} genomes${
-                        metricsB.n_features !== undefined ? `, ${metricsB.n_features} features` : ""
-                      }`
+                    ? `${metricsB.n_genomes} genomes${metricsB.n_features !== undefined ? `, ${metricsB.n_features} features` : ""
+                    }`
                     : metricsB.n_genes !== undefined
-                    ? `${metricsB.n_genes} genes`
-                    : "N/A",
+                      ? `${metricsB.n_genes} genes`
+                      : "N/A",
               },
               {
                 label: "Antibiotics (successful)",

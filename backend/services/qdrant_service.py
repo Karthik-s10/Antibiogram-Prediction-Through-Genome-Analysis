@@ -217,7 +217,54 @@ class QdrantService:
                 continue
 
         return total_inserted
-    
+
+    def get_all_existing_ids(self) -> set:
+        """Return the set of all stable point IDs currently in the collection.
+
+        Scrolls through the entire collection once. Much more efficient than
+        calling genome_exists() per-genome during a bulk populate.
+        """
+        if not self.client:
+            return set()
+        existing = set()
+        try:
+            offset = None
+            while True:
+                result, next_offset = self.client.scroll(
+                    collection_name=self.COLLECTION_NAME,
+                    limit=1000,
+                    offset=offset,
+                    with_payload=False,
+                    with_vectors=False,
+                )
+                for pt in result:
+                    existing.add(pt.id)
+                if next_offset is None:
+                    break
+                offset = next_offset
+            logger.info(f"Found {len(existing)} existing points in Qdrant collection.")
+        except Exception as e:
+            logger.error(f"Error fetching existing IDs: {e}")
+        return existing
+
+    def genome_exists(self, genome_id: str) -> bool:
+        """Check if a genome already exists in the collection.
+
+        For bulk operations prefer get_all_existing_ids() to avoid N round-trips.
+        """
+        if not self.client:
+            return False
+        try:
+            results = self.client.retrieve(
+                collection_name=self.COLLECTION_NAME,
+                ids=[self._stable_point_id(genome_id)],
+                with_payload=False,
+                with_vectors=False,
+            )
+            return len(results) > 0
+        except Exception:
+            return False
+
     def search_similar_genomes(
         self,
         query_embedding: np.ndarray,

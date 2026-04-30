@@ -104,10 +104,10 @@ export const WavyBackground = ({
       for (let x = 0; x < w; x += basePairSpacing) {
         const y1 = strand1Y[Math.floor(x)];
         const y2 = strand2Y[Math.floor(x)];
-        
+
         // Alternate base pair colors
         const baseColor = baseColors[Math.floor((x / basePairSpacing) + phase * 10) % baseColors.length];
-        
+
         // Draw base pair connection
         ctx.beginPath();
         ctx.moveTo(x, y1);
@@ -132,26 +132,26 @@ export const WavyBackground = ({
     };
 
     const render = () => {
-      // Create a more vibrant gradient background
-      const gradient = ctx.createLinearGradient(0, 0, w, h);
-      gradient.addColorStop(0, '#e0f2fe');  // Brighter light blue
-      gradient.addColorStop(0.4, '#ede9fe'); // Brighter light purple
-      gradient.addColorStop(0.7, '#fae8ff'); // Brighter light pink
-      gradient.addColorStop(1, '#f0f9ff');   // Soft blue-white
-      
-      ctx.fillStyle = gradient;
+      ctx.fillStyle = backgroundFill;
       ctx.fillRect(0, 0, w, h);
+
+      const time = timeRef.current;
+
+      // Draw multiple DNA strands with different properties
+      // Strand 1: Amber/Golden (Highlight)
+      drawDNAStrand(h / 2, 40, 100, time * 0.002, colors[3] || "#f59e0b", 20);
+
+      // Strand 2: Cyan/Blue (Background depth)
+      drawDNAStrand(h / 2, 30, 120, time * 0.0015 + 2, colors[4] || "#0891b2", 25);
+
+      // Strand 3: Deep Blue (Subtle movement)
+      drawDNAStrand(h / 2, 50, 150, time * 0.001 - 1, colors[1] || "#1e3a8a", 30);
+
+      timeRef.current += (speed === "fast" ? 10 : 5);
+      animationFrameId.current = requestAnimationFrame(render);
     };
 
     render();
-    
-    // Handle window resize
-    const handleResize = () => {
-      setCanvasSize();
-      render();
-    };
-    
-    window.addEventListener('resize', handleResize);
 
     return () => {
       window.removeEventListener("resize", setCanvasSize);

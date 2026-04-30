@@ -22,13 +22,14 @@ Usage (from project root):
 """
 
 import argparse
+from typing import Dict
 
 
 def analyze_k_values(kmer_path: Path) -> None:
     if not kmer_path.is_file():
         raise FileNotFoundError(f"K-mer file not found: {kmer_path}")
 
-    genome_to_k = {}
+    genome_to_k: Dict[str, int] = {}
     # We only need the first k per genome; use a dict and never overwrite
 
     with kmer_path.open("r", encoding="utf-8", errors="ignore") as f:
@@ -58,7 +59,7 @@ def analyze_k_values(kmer_path: Path) -> None:
             genome_to_k[genome_id] = k_val
 
     # Now count how many genomes per k
-    k_counts = collections.Counter(genome_to_k.values())
+    k_counts = collections.Counter(genome_to_k.values())  # type: ignore
 
     print(f"Analyzed file: {kmer_path}")
     print(f"Total unique genome IDs: {len(genome_to_k)}")

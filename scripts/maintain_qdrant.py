@@ -8,10 +8,10 @@ import os
 import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
-import requests
-from qdrant_client import QdrantClient
-from qdrant_client.http import models
-from dotenv import load_dotenv
+import requests  # type: ignore
+from qdrant_client import QdrantClient  # type: ignore
+from qdrant_client.http import models  # type: ignore
+from dotenv import load_dotenv  # type: ignore
 
 # Configure logging
 log_file = f"qdrant_maintenance_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.log"
@@ -61,7 +61,25 @@ class QdrantMaintainer:
                 "config": collection.config.dict() if collection.config else None
             }
         except Exception as e:
-            logger.error(f"Failed to get collection info: {e}")
+            logger.warning(f"Failed to get collection info via QdrantClient: {e}")
+            logger.info("Falling back to raw HTTP request...")
+            try:
+                headers = {"api-key": self.api_key} if self.api_key else {}
+                res = requests.get(
+                    f"{self.qdrant_url}/collections/{self.collection_name}",
+                    headers=headers,
+                    timeout=10
+                )
+                res.raise_for_status()
+                data = res.json().get("result", {})
+                return {
+                    "status": "exists",
+                    "vectors_count": data.get("vectors_count"),
+                    "points_count": data.get("points_count"),
+                    "config": data.get("config")
+                }
+            except Exception as req_e:
+                logger.error(f"Fallback HTTP request to get info failed: {req_e}")
             return None
             
     def perform_health_check(self) -> bool:
@@ -89,7 +107,21 @@ class QdrantMaintainer:
             )
             return True
         except Exception as e:
-            logger.error(f"Failed to update collection TTL: {e}")
+            logger.warning(f"Failed to update collection TTL via QdrantClient: {e}")
+            logger.info("Falling back to raw HTTP request...")
+            try:
+                headers = {"api-key": self.api_key, "Content-Type": "application/json"} if self.api_key else {"Content-Type": "application/json"}
+                payload = {"optimizers_config": {}}
+                res = requests.patch(
+                    f"{self.qdrant_url}/collections/{self.collection_name}",
+                    headers=headers,
+                    json=payload,
+                    timeout=10
+                )
+                res.raise_for_status()
+                return True
+            except Exception as req_e:
+                logger.error(f"Fallback HTTP request to update TTL failed: {req_e}")
             return False
             
     def send_notification(self, success: bool, message: str):

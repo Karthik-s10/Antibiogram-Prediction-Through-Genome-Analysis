@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>DNABERT Publication Figures</title>
+<style>
+  body{font-family:"Segoe UI",sans-serif;background:#0d1117;color:#e6edf3;padding:40px;max-width:900px;margin:auto}
+  h1{color:#58a6ff;border-bottom:1px solid #30363d;padding-bottom:12px}
+  h2{color:#79c0ff;margin-top:28px}
+  table{border-collapse:collapse;width:100%;margin-bottom:20px}
+  td,th{padding:8px 14px;text-align:left;border:1px solid #30363d;font-size:14px}
+  th{background:#161b22;color:#8b949e}
+  a{color:#58a6ff;text-decoration:none}
+  ul{line-height:2.2;font-size:15px}
+</style>
+</head>
+<body>
+<h1>DNABERT Attention Visualizations</h1>
+<p>Antibiogram Prediction Through Genome Analysis — Transformer Attention Rollup</p>
+<h2>Model Summary</h2>
+<table>
+  <tr><th>Field</th><th>Value</th></tr>
+  <tr><td>Model</td><td><code>transformer_ce13dcc6</code></td></tr>
+  <tr><td>Antibiotics</td><td>110</td></tr>
+  <tr><td>Method</td><td>Attention rollup (avg heads, all layers)</td></tr>
+  <tr><td>Genome</td><td>AP011121 — Acetobacter pasteurianus</td></tr>
+  <tr><td>Genes Used</td><td>50</td></tr>
+</table>
+<h2>Generated Figures</h2>
+<ul>
+<li><a href="dnabert_attention_per_antibiotic.pdf" target="_blank">Per-Antibiotic Attention Heatmap (PDF)</a></li>
+<li><a href="dnabert_top_tokens.png" target="_blank">Top-20 Attended Token Grid</a></li>
+<li><a href="dnabert_token_sharing.png" target="_blank">Cross-Antibiotic Token Sharing Heatmap</a></li>
+<li><a href="dnabert_gene_spotlight.png" target="_blank">Gene Spotlight (per-position attention)</a></li>
+</ul>
+</body>
+</html>

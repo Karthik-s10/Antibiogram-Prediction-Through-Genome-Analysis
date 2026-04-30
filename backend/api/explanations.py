@@ -72,8 +72,11 @@ def initialize_explainers():
         logger.error(f"Failed to initialize XGBoost explainer: {str(e)}")
     
     try:
-        transformer_explainer = TransformerExplainer()
-        logger.info("Transformer explainer initialized")
+        import os
+        from config import settings  # type: ignore
+        models_dir = settings.model_storage_path
+        transformer_explainer = TransformerExplainer(models_dir=models_dir)
+        logger.info(f"Transformer explainer initialized (models_dir={models_dir})")
     except Exception as e:
         logger.error(f"Failed to initialize Transformer explainer: {str(e)}")
 

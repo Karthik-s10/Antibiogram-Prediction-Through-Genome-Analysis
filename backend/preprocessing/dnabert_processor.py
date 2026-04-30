@@ -65,7 +65,8 @@ class DNABERTProcessor:
                 
                 parts = line.strip().split('\t')
                 if len(parts) >= 4:
-                    genome_id = parts[0]
+                    # The first column is often a numeric Taxon ID rather than an Assembly Accession
+                    genome_id = str(parts[0]).strip()
                     kmer = parts[3]
                     
                     # Only process if k-mer size matches
@@ -92,13 +93,18 @@ class DNABERTProcessor:
                     if len(chunk) > 0:
                         gene_seq = self._reconstruct_sequence_from_kmers(chunk)
                         
-                        # Only keep sequences that are reasonable gene length
-                        if 300 <= len(gene_seq) <= 3000:  # 100aa to 1000aa
+                        # Accept sequences of any reasonable length ≥ one k-mer
+                        if len(gene_seq) >= self.k:
                             genes_per_genome.append(gene_seq)
-                
-                # Limit to reasonable number of genes per genome
+            
                 if genes_per_genome:
                     genome_to_genes[genome_id] = genes_per_genome[:30]  # Max 30 genes per genome
+                elif kmers_sorted:
+                    # Fallback: concatenate all available k-mers into one pseudo-sequence
+                    # (handles genomes with very few distinct k-mers that produce tiny chunks)
+                    fallback_seq = ''.join(kmers_sorted)[:3000]
+                    if len(fallback_seq) >= self.k:
+                        genome_to_genes[genome_id] = [fallback_seq]
             
             logger.info(f"Extracted genes from {len(genome_to_genes)} genomes")
             logger.info(f"Average genes per genome: {np.mean([len(g) for g in genome_to_genes.values()]):.1f}")
@@ -181,8 +187,16 @@ class DNABERTProcessor:
                 phenotype_df = phenotype_df.rename(columns={antibiotic_col: 'antibiotic'})
 
         logger.info("Indexing phenotype data by genome_id for fast lookup...")
+        
+        # Reset index in case 'genome_id' was inadvertently set as the index
+        if 'genome_id' not in phenotype_df.columns and phenotype_df.index.name == 'genome_id':
+            phenotype_df = phenotype_df.reset_index()
+            
+        # Strip trailing decimals from Genome IDs (e.g. "903915.3" -> "903915") to match k-mer keys
+        phenotype_df['genome_id'] = phenotype_df['genome_id'].astype(str).apply(lambda x: x.split('.')[0] if '.' in x else x)
+        
         pheno_by_genome = {gid: group for gid, group in phenotype_df.groupby('genome_id')}
-        logger.info(f"Indexed phenotypes for {len(pheno_by_genome)} genomes")
+        logger.info(f"Indexed phenotypes for {len(pheno_by_genome)} base genomes")
         
         # Create gene-level dataset
         gene_records = []
@@ -192,32 +206,43 @@ class DNABERTProcessor:
             # Get phenotypes for this genome
             genome_phenotypes = pheno_by_genome.get(genome_id)
             
-            if genome_phenotypes is None or len(genome_phenotypes) == 0:
-                continue
+            if idx <= 5:
+                logger.debug(f"Checking genome_id '{genome_id}'. Has {len(genes)} genes. In pheno_by_genome? {genome_id in pheno_by_genome}")
 
-            processed_with_pheno += 1
+            processed_with_pheno += 1 if genome_phenotypes is not None else 0
             
             # For each gene, create entries for each antibiotic
             for gene_seq in genes:
-                for _, pheno_row in genome_phenotypes.iterrows():
-                    antibiotic = pheno_row.get('antibiotic', '')
-                    phenotype = pheno_row.get('phenotype', pheno_row.get('Resistant Phenotype', ''))
-                    
-                    # Encode phenotype
-                    if phenotype in ['S', 'Susceptible']:
-                        label = 0
-                    elif phenotype in ['I', 'Intermediate']:
-                        label = 1
-                    elif phenotype in ['R', 'Resistant']:
-                        label = 2
-                    else:
-                        continue
-                    
+                added_any = False
+                if genome_phenotypes is not None and not genome_phenotypes.empty:
+                    for _, pheno_row in genome_phenotypes.iterrows():
+                        antibiotic = pheno_row.get('antibiotic', '')
+                        phenotype = pheno_row.get('phenotype', pheno_row.get('Resistant Phenotype', ''))
+                        
+                        # Encode phenotype
+                        if phenotype in ['S', 'Susceptible']:
+                            label = 0
+                        elif phenotype in ['I', 'Intermediate']:
+                            label = 1
+                        elif phenotype in ['R', 'Resistant']:
+                            label = 2
+                        else:
+                            continue
+                        
+                        gene_records.append({
+                            'genome_id': genome_id,
+                            'gene_sequence': gene_seq,
+                            'antibiotic': antibiotic,
+                            'label': label
+                        })
+                        added_any = True
+
+                if not added_any:
                     gene_records.append({
                         'genome_id': genome_id,
                         'gene_sequence': gene_seq,
-                        'antibiotic': antibiotic,
-                        'label': label
+                        'antibiotic': 'unknown',
+                        'label': -1
                     })
 
             if idx % 10 == 0 or idx == total_genomes:
@@ -231,7 +256,11 @@ class DNABERTProcessor:
                     f"elapsed={elapsed/60:.1f} min, ETA={eta/60:.1f} min"
                 )
         
-        gene_df = pd.DataFrame(gene_records)
+        if len(gene_records) == 0:
+            gene_df = pd.DataFrame(columns=['genome_id', 'gene_sequence', 'antibiotic', 'label'])
+        else:
+            gene_df = pd.DataFrame(gene_records)
+            
         total_elapsed = time.time() - start_time
         
         logger.info(f"Created gene dataset with {len(gene_df)} entries in {total_elapsed/60:.1f} min")

@@ -44,8 +44,25 @@ interface TrainingJob {
   modelType: string;
 }
 
+import { useSearchParams } from "react-router-dom";
+
 const HomePage = () => {
-  const [activeTab, setActiveTab] = useState("upload");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = searchParams.get("tab") || "upload";
+  const [activeTab, setActiveTabState] = useState(initialTab);
+
+  // Sync state when URL parameter changes (enables navbar routing)
+  React.useEffect(() => {
+    const tabFromUrl = searchParams.get("tab");
+    if (tabFromUrl && tabFromUrl !== activeTab) {
+      setActiveTabState(tabFromUrl);
+    }
+  }, [searchParams, activeTab]);
+
+  const setActiveTab = (value: string) => {
+    setActiveTabState(value);
+    setSearchParams({ tab: value });
+  };
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadedGenome, setUploadedGenome] = useState<GenomeData | null>(null);
   const [processedResult, setProcessedResult] =
@@ -151,10 +168,10 @@ const HomePage = () => {
             }
             : undefined,
           reasoning: `Predicted ${p.prediction === "R"
-              ? "Resistant"
-              : p.prediction === "I"
-                ? "Intermediate"
-                : "Susceptible"
+            ? "Resistant"
+            : p.prediction === "I"
+              ? "Intermediate"
+              : "Susceptible"
             } with ${(p.confidence * 100).toFixed(1)}% confidence based on genomic patterns.`,
         };
       });
@@ -211,7 +228,7 @@ const HomePage = () => {
   };
 
   return (
-    <div className="min-h-screen p-6 md:p-10">
+    <div className="min-h-screen px-6 pb-6 pt-28 md:px-10 md:pb-10 md:pt-32">
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -219,18 +236,18 @@ const HomePage = () => {
         className="max-w-7xl mx-auto"
       >
         <header className="mb-8 text-center">
-          <h1 className="text-3xl md:text-4xl lg:text-6xl font-bold text-slate-800 mb-4 drop-shadow-lg">
+          <h1 className="text-3xl md:text-4xl lg:text-6xl font-bold text-slate-100 mb-4 drop-shadow-lg">
             Bacterial Antibiogram Predictor
           </h1>
-          <p className="text-base md:text-lg lg:text-xl text-slate-700 font-normal max-w-2xl mx-auto drop-shadow-md">
+          <p className="text-base md:text-lg lg:text-xl text-slate-300 font-normal max-w-2xl mx-auto drop-shadow-md">
             Predict antibiotic resistance profiles from whole-genome sequences using AI-powered machine learning
           </p>
         </header>
 
-        <Card className="bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 border border-blue-100 shadow-lg">
+        <Card className="bg-slate-900/50 backdrop-blur-md border border-slate-800 shadow-2xl">
           <CardHeader>
-            <CardTitle>Antibiogram Analysis</CardTitle>
-            <CardDescription>
+            <CardTitle className="text-slate-100">Antibiogram Analysis</CardTitle>
+            <CardDescription className="text-slate-400">
               Upload a bacterial genome sequence (FASTA format) to predict its
               antibiotic resistance profile.
             </CardDescription>
@@ -242,7 +259,7 @@ const HomePage = () => {
               className="w-full"
             >
               <div className="mb-6 flex flex-col gap-2">
-                <span className="text-sm font-medium text-slate-700">
+                <span className="text-sm font-medium text-slate-300">
                   Prediction model mode
                 </span>
                 <RadioGroup
@@ -254,79 +271,80 @@ const HomePage = () => {
                     )
                   }
                 >
-                  <div className="flex items-start space-x-2 rounded-md border p-3">
-                    <RadioGroupItem value="xgboost" id="mode-xgboost" />
+                  <div className="flex items-start space-x-2 rounded-md border border-slate-700 bg-slate-800/50 p-3 text-slate-200 hover:bg-slate-800 transition-colors">
+                    <RadioGroupItem value="xgboost" id="mode-xgboost" className="border-slate-400" />
                     <Label
                       htmlFor="mode-xgboost"
-                      className="space-y-1 leading-tight"
+                      className="space-y-1 leading-tight cursor-pointer"
                     >
                       <span className="block text-sm font-semibold">
                         XGBoost only
                       </span>
-                      <span className="block text-xs text-slate-600">
+                      <span className="block text-xs text-slate-400">
                         Fast baseline classifier using k-mer features.
                       </span>
                     </Label>
                   </div>
-                  <div className="flex items-start space-x-2 rounded-md border p-3">
+                  <div className="flex items-start space-x-2 rounded-md border border-slate-700 bg-slate-800/50 p-3 text-slate-200 hover:bg-slate-800 transition-colors">
                     <RadioGroupItem
                       value="transformer"
                       id="mode-transformer"
+                      className="border-slate-400"
                     />
                     <Label
                       htmlFor="mode-transformer"
-                      className="space-y-1 leading-tight"
+                      className="space-y-1 leading-tight cursor-pointer"
                     >
                       <span className="block text-sm font-semibold">
                         Transformer only
                       </span>
-                      <span className="block text-xs text-slate-600">
+                      <span className="block text-xs text-slate-400">
                         DNABERT genome embeddings with similarity search.
                       </span>
                     </Label>
                   </div>
-                  <div className="flex items-start space-x-2 rounded-md border p-3 bg-slate-50">
-                    <RadioGroupItem value="both" id="mode-both" />
+                  <div className="flex items-start space-x-2 rounded-md border border-blue-500/50 bg-blue-900/20 p-3 text-slate-200 hover:bg-blue-900/30 transition-colors">
+                    <RadioGroupItem value="both" id="mode-both" className="border-slate-400" />
                     <Label
                       htmlFor="mode-both"
-                      className="space-y-1 leading-tight"
+                      className="space-y-1 leading-tight cursor-pointer"
                     >
                       <span className="block text-sm font-semibold">
                         Both (ensemble)
                       </span>
-                      <span className="block text-xs text-slate-600">
+                      <span className="block text-xs text-blue-300/80">
                         Transformer as main model, XGBoost as supporting signal.
                       </span>
                     </Label>
                   </div>
                 </RadioGroup>
-                <div className="flex items-center gap-2 mt-2 text-xs text-slate-600">
+                <div className="flex items-center gap-2 mt-2 text-xs text-slate-400">
                   <input
                     id="toggle-blast"
                     type="checkbox"
-                    className="h-3 w-3"
+                    className="h-3 w-3 accent-blue-500"
                     checked={useBlast}
                     onChange={(e) => setUseBlast(e.target.checked)}
                   />
-                  <Label htmlFor="toggle-blast" className="text-xs text-slate-600">
+                  <Label htmlFor="toggle-blast" className="text-xs text-slate-400 cursor-pointer">
                     Use BLAST naming for Transformer markers (slower)
                   </Label>
                 </div>
               </div>
-              <TabsList className="grid w-full grid-cols-5 mb-8">
-                <TabsTrigger value="upload" disabled={isProcessing}>
+              <TabsList className="grid w-full grid-cols-5 mb-8 bg-slate-800/80 text-slate-300 p-1 rounded-lg">
+                <TabsTrigger value="upload" disabled={isProcessing} className="data-[state=active]:bg-slate-700 data-[state=active]:text-white">
                   Genome Upload
                 </TabsTrigger>
-                <TabsTrigger value="database">
+                <TabsTrigger value="database" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white">
                   Genome Database
                 </TabsTrigger>
-                <TabsTrigger value="results" disabled={!processedResult}>
+                <TabsTrigger value="results" disabled={!processedResult} className="data-[state=active]:bg-slate-700 data-[state=active]:text-white">
                   Results Dashboard
                 </TabsTrigger>
-                <TabsTrigger value="training">
+                <TabsTrigger value="training" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white">
                   Model Training
                 </TabsTrigger>
-                <TabsTrigger value="training-status">
+                <TabsTrigger value="training-status" className="data-[state=active]:bg-slate-700 data-[state=active]:text-white">
                   Training Status
                 </TabsTrigger>
               </TabsList>
@@ -397,11 +415,11 @@ const HomePage = () => {
           </CardContent>
         </Card>
 
-        <footer className="mt-8 text-center text-sm text-slate-600">
+        <footer className="mt-8 text-center text-sm text-slate-500">
           <p>
             Bacterial Antibiogram Predictor &copy; {new Date().getFullYear()}
           </p>
-          <p className="mt-1">
+          <p className="mt-1 text-slate-400">
             Predicting antibiotic resistance from genomic data
           </p>
         </footer>

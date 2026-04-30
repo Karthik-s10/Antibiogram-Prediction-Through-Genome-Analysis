@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>SHAP Publication Figures</title>
+<style>
+  body{font-family:"Segoe UI",sans-serif;background:#0d1117;color:#e6edf3;padding:40px;max-width:900px;margin:auto}
+  h1{color:#58a6ff;border-bottom:1px solid #30363d;padding-bottom:12px}
+  h2{color:#79c0ff;margin-top:28px}
+  table{border-collapse:collapse;width:100%;margin-bottom:20px}
+  td,th{padding:8px 14px;text-align:left;border:1px solid #30363d;font-size:14px}
+  th{background:#161b22;color:#8b949e}
+  a{color:#58a6ff;text-decoration:none}
+  a:hover{color:#a5d6ff}
+  ul{line-height:2.2;font-size:15px}
+  .badge{background:#1f6feb;color:#fff;padding:2px 8px;border-radius:4px;font-size:12px}
+</style>
+</head>
+<body>
+<h1>SHAP Publication Visualizations</h1>
+<p>Antibiogram Prediction Through Genome Analysis — XGBoost Feature Importance</p>
+
+<h2>Model Summary</h2>
+<table>
+  <tr><th>Field</th><th>Value</th></tr>
+  <tr><td>Model</td><td><code>xgboost_f0849bdd</code></td></tr>
+  <tr><td>Training Genomes</td><td>3,204</td></tr>
+  <tr><td>K-mer Features</td><td>155,211</td></tr>
+  <tr><td>Antibiotics Covered</td><td>134</td></tr>
+  <tr><td>Max Depth</td><td>8</td></tr>
+  <tr><td>Learning Rate</td><td>0.1</td></tr>
+  <tr><td>Estimators</td><td>1000</td></tr>
+</table>
+
+<h2>Generated Figures</h2>
+<ul>
+<li><a href="heatmap_top_kmers.png" target="_blank">Global K-mer Heatmap (Top 30 x All Antibiotics)</a></li>
+<li><a href="barplots_per_antibiotic.pdf" target="_blank">Per-Antibiotic SHAP Bar Charts (PDF, all antibiotics)</a></li>
+<li><a href="summary_grid_top10.png" target="_blank">Top-10 K-mer Summary Grid</a></li>
+<li><a href="kmer_sharing_heatmap.png" target="_blank">K-mer Sharing / Jaccard Heatmap</a></li>
+<li><a href="violin_importance.png" target="_blank">Importance Distribution (Violin Plot)</a></li>
+</ul>
+</body>
+</html>

@@ -114,7 +114,8 @@ class DataPreprocessor:
     def load_and_map_phenotypes(
         self,
         phenotype_file: str,
-        id_mapping: Dict[str, str]
+        id_mapping: Dict[str, str],
+        use_taxon_id: bool = False
     ) -> pd.DataFrame:
         """
         Load phenotype data and map PATRIC IDs to Assembly Accessions (GCA_xxx format).
@@ -155,8 +156,11 @@ class DataPreprocessor:
                 pheno_df = pheno_df[pheno_df['Evidence'] == 'Laboratory Method']
                 logger.info(f"Filtered to {len(pheno_df)} laboratory-validated records")
             
-            # Map PATRIC IDs to Assembly Accessions (GCA_xxx format to match k-mer file)
-            pheno_df['Assembly Accession'] = pheno_df['Genome ID'].map(id_mapping)
+            if use_taxon_id:
+                pheno_df['Assembly Accession'] = pheno_df['Taxon ID'].astype(str).str.strip()
+            else:
+                # Map PATRIC IDs to Assembly Accessions (GCA_xxx format to match k-mer file)
+                pheno_df['Assembly Accession'] = pheno_df['Genome ID'].map(id_mapping)
             
             # Remove rows without mapping
             before_count = len(pheno_df)
@@ -436,7 +440,8 @@ class DataPreprocessor:
         phenotype_file: str,
         kmer_file: str,
         use_cache: bool = True,
-        save_cache: bool = True
+        save_cache: bool = True,
+        use_taxon_id: bool = False
     ) -> Tuple[pd.DataFrame, pd.DataFrame, Dict]:
         """
         Main preprocessing pipeline.
@@ -491,7 +496,7 @@ class DataPreprocessor:
         id_mapping = self.load_id_mapping()
         
         # Step 2: Load and map phenotype data
-        pheno_df = self.load_and_map_phenotypes(phenotype_file, id_mapping)
+        pheno_df = self.load_and_map_phenotypes(phenotype_file, id_mapping, use_taxon_id=use_taxon_id)
         n_phenotype_records = len(pheno_df)
         # Count unique genomes in phenotype after mapping (Assembly Accession index space)
         n_phenotype_genomes = int(pheno_df['Assembly Accession'].nunique())

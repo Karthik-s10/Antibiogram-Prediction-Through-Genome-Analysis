@@ -519,6 +519,16 @@ class XGBoostTrainer:
         trainer.learning_rate = save_dict['hyperparameters']['learning_rate']
         trainer.n_estimators = save_dict['hyperparameters']['n_estimators']
         
+        # Ensure all loaded models use CPU for prediction to avoid 
+        # GPU/CPU device mismatch warnings when passing numpy arrays.
+        # Single-genome inference is extremely fast on CPU anyway.
+        for model in trainer.models.values():
+            try:
+                if hasattr(model, 'set_params'):
+                    model.set_params(device='cpu')
+            except Exception:
+                pass
+
         logger.info(f"Loaded XGBoost models from {model_path}")
         
         return trainer
@@ -538,6 +548,13 @@ class XGBoostTrainer:
         
         predictions = {}
         for antibiotic, model in self.models.items():
+            # XGBoost 2.x warns if model is on GPU but data is on CPU.
+            # Force CPU for single-sample inference to avoid overhead and warnings.
+            try:
+                model.set_params(device="cpu")
+            except Exception:
+                pass
+
             pred_enc = model.predict(X)[0]
             # Map encoded prediction back to original label if mapping exists
             enc_to_label = self.label_inv_mappings.get(antibiotic)
@@ -564,6 +581,13 @@ class XGBoostTrainer:
         
         probabilities = {}
         for antibiotic, model in self.models.items():
+            # XGBoost 2.x warns if model is on GPU but data is on CPU.
+            # Force CPU for single-sample inference to avoid overhead and warnings.
+            try:
+                model.set_params(device="cpu")
+            except Exception:
+                pass
+
             proba_raw = model.predict_proba(X)[0]
             enc_to_label = self.label_inv_mappings.get(antibiotic)
             if enc_to_label is not None:
